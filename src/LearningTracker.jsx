@@ -1,5 +1,6 @@
 import React from 'react'
 import { css } from './css'
+import NoteEditor from './components/NoteEditor'
 
 const KEY = 'lt_state_v7'
 const AR_MONTHS = ['يناير','فبراير','مارس','أبريل','مايو','يونيو','يوليو','أغسطس','سبتمبر','أكتوبر','نوفمبر','ديسمبر']
@@ -35,9 +36,6 @@ const uid = () => Math.random().toString(36).slice(2, 9)
 export default class LearningTracker extends React.Component {
   constructor(props) {
     super(props)
-    this._noteRef = React.createRef()
-    this._noteSyncId = null
-    this._noteSyncNode = null
     this.state = this.buildInitial()
   }
 
@@ -216,24 +214,11 @@ export default class LearningTracker extends React.Component {
   setNoteSort(k) { this.setState({ noteSort: k }) }
   updateNote(id, field, val) { this.commitProject(p => ({ ...p, notesList:(p.notesList||[]).map(x => x.id!==id ? x : { ...x, [field]:val, updatedAt:Date.now() }) })) }
   saveNoteBody(html) { const id = this.state.activeNoteId; if (id) this.updateNote(id, 'body', html) }
-  exec(cmd) { return (e) => { if (e && e.preventDefault) e.preventDefault(); try { document.execCommand(cmd, false, null) } catch(_){} const node = this._noteRef.current; if (node) this.saveNoteBody(node.innerHTML) } }
   noteTodoMap(fn) { const id = this.state.activeNoteId; this.commitProject(p => ({ ...p, notesList:(p.notesList||[]).map(n => n.id!==id ? n : { ...n, todos: fn(n.todos||[]), updatedAt:Date.now() }) })) }
   addTodo() { this.noteTodoMap(t => [...t, { id:uid(), text:'', done:false }]) }
   toggleTodo(tid) { this.noteTodoMap(t => t.map(x => x.id!==tid ? x : { ...x, done:!x.done })) }
   setTodoText(tid, val) { this.noteTodoMap(t => t.map(x => x.id!==tid ? x : { ...x, text:val })) }
   removeTodo(tid) { this.noteTodoMap(t => t.filter(x => x.id!==tid)) }
-  componentDidUpdate() {
-    const node = this._noteRef.current
-    if (!node) { this._noteSyncNode = null; this._noteSyncId = null; return }
-    const p = this.ap(); if (!p) return
-    const an = (p.notesList||[]).find(n => n.id === this.state.activeNoteId)
-    if (!an) return
-    if (node !== this._noteSyncNode || this._noteSyncId !== an.id) {
-      const b = an.body || ''
-      node.innerHTML = /[<]/.test(b) ? b : b.replace(/\n/g, '<br>')
-      this._noteSyncNode = node; this._noteSyncId = an.id
-    }
-  }
   deleteNote(id) {
     if (!confirm('حذف هذه الملاحظة؟')) return
     this.commit(s => ({ projects: s.projects.map(p => { if (p.id!==s.activeProjectId) return p; const list=(p.notesList||[]).filter(x=>x.id!==id); return { ...p, notesList:list } }), activeNoteId: (s.activeNoteId===id ? null : s.activeNoteId) }))
@@ -719,8 +704,7 @@ export default class LearningTracker extends React.Component {
       // notes
       notesItems, notesCount: noteList.length, hasNotes: noteList.length>0, noNotes: noteList.length===0, noteSortOptions,
       activeNote: !!activeNote, noActiveNote: noteList.length>0 && !activeNote, noteTitle: activeNote? (activeNote.title||'') : '', noteSavedLabel: activeNote? ('آخر حفظ · '+noteUpdated) : '',
-      noteRef: this._noteRef, noteBodyInput: e => this.saveNoteBody(e.target.innerHTML),
-      execBold: this.exec('bold'), execItalic: this.exec('italic'), execUnderline: this.exec('underline'), execUL: this.exec('insertUnorderedList'), execStrike: this.exec('strikeThrough'),
+      noteId: activeNote ? activeNote.id : null, noteBody: activeNote ? (activeNote.body||'') : '', onNoteChange: html => this.saveNoteBody(html),
       noteTodos, todoCount: aTodos.length, todoDone, hasTodos: aTodos.length>0, noTodos: aTodos.length===0, addTodo: () => this.addTodo(),
       setNoteTitle: e => activeNote && this.updateNote(activeNote.id,'title',e.target.value),
       deleteActiveNote: () => activeNote && this.deleteNote(activeNote.id),
@@ -1555,17 +1539,7 @@ export default class LearningTracker extends React.Component {
               <div style={css('flex:1;min-width:0;display:flex;flex-direction:column;gap:16px;min-height:0;')}>
                 <div style={css('flex:1;min-height:0;background:var(--app-surface);border:1px solid var(--app-border);border-radius:18px;display:flex;flex-direction:column;overflow:hidden;')}>
                   <input value={v.noteTitle} onChange={v.setNoteTitle} placeholder="عنوان الملاحظة" style={css('background:transparent;border:none;outline:none;padding:22px 26px 10px;font:700 23px var(--font-brand);color:var(--app-text);')} />
-                  <div style={css('display:flex;align-items:center;gap:3px;margin:0 22px 4px;padding:4px;background:var(--app-surface-2);border-radius:11px;align-self:flex-start;')}>
-                    <button onMouseDown={v.execBold} title="عريض" style={css('width:34px;height:34px;border:none;background:transparent;color:var(--app-text);border-radius:8px;cursor:pointer;font:800 16px Georgia,serif;')}>B</button>
-                    <button onMouseDown={v.execItalic} title="مائل" style={css('width:34px;height:34px;border:none;background:transparent;color:var(--app-text);border-radius:8px;cursor:pointer;font:italic 700 16px Georgia,serif;')}>I</button>
-                    <button onMouseDown={v.execUnderline} title="تسطير" style={css('width:34px;height:34px;border:none;background:transparent;color:var(--app-text);border-radius:8px;cursor:pointer;font:600 15px Georgia,serif;text-decoration:underline;')}>U</button>
-                    <button onMouseDown={v.execStrike} title="شطب" style={css('width:34px;height:34px;border:none;background:transparent;color:var(--app-text);border-radius:8px;cursor:pointer;font:600 15px Georgia,serif;text-decoration:line-through;')}>S</button>
-                    <div style={css('width:1px;height:20px;background:var(--app-border);margin:0 5px;')}></div>
-                    <button onMouseDown={v.execUL} title="قائمة نقطية" style={css('width:34px;height:34px;border:none;background:transparent;color:var(--app-text);border-radius:8px;cursor:pointer;display:flex;align-items:center;justify-content:center;')}><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><circle cx="5" cy="7" r="1.5" fill="currentColor"></circle><circle cx="5" cy="17" r="1.5" fill="currentColor"></circle><path d="M10 7h10"></path><path d="M10 17h10"></path></svg></button>
-                  </div>
-                  <div style={css('flex:1;overflow:auto;min-height:0;')}>
-                    <div contentEditable={true} suppressContentEditableWarning={true} ref={v.noteRef} onInput={v.noteBodyInput} data-ph="اكتب ملاحظتك هنا…" style={css('padding:12px 26px 24px;font:15.5px/2 var(--font-brand);color:var(--app-text);min-height:100%;')}></div>
-                  </div>
+                  <NoteEditor key={v.noteId} value={v.noteBody} onChange={v.onNoteChange} />
                   <div style={css('display:flex;align-items:center;justify-content:space-between;gap:12px;padding:11px 22px;border-top:1px solid var(--app-border);')}>
                     <div style={css('font-size:12px;color:var(--app-faint);display:flex;align-items:center;gap:7px;')}><span style={css('width:7px;height:7px;border-radius:50%;background:var(--app-accent);')}></span>{v.noteSavedLabel}</div>
                     <button onClick={v.deleteActiveNote} style={css('display:flex;align-items:center;gap:6px;background:transparent;border:1px solid var(--app-border);color:var(--app-faint);border-radius:9px;padding:8px 14px;font:600 12.5px var(--font-brand);cursor:pointer;')}><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M4 7h16"></path><path d="M9 7V5h6v2"></path><path d="M7 7l1 13h8l1-13"></path></svg>حذف</button>
