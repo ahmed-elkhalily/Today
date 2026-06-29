@@ -48,7 +48,7 @@ export default class LearningTracker extends React.Component {
       screen: 'today',
       logDate: isoDate(Date.now()), logHours: 1.5, logLearnPct: 65, logNote: '',
       showGoalModal: false, ngTitle: '', ngDeadline: isoDate(Date.now()+14*DAY), ngBudget: 12, ngTaskRows: [{id:uid(),label:'',hours:''},{id:uid(),label:'',hours:''},{id:uid(),label:'',hours:''}],
-      showProjectMenu: false, showProjectModal: false, npName: '', npSubtitle: '', npHourGoal: 100, npDailyTarget: 2,
+      showProjectMenu: false, showProjectModal: false, showCreate: false, npName: '', npSubtitle: '', npHourGoal: 100, npDailyTarget: 2,
       ob: this.blankOb(),
     }
     if (demo) {
@@ -188,7 +188,8 @@ export default class LearningTracker extends React.Component {
       return { projects, activeProjectId: nextId, logGoalId: wasActive ? (ag ? ag.id : '') : s.logGoalId, timer: wasActive ? { ...s.timer, mode:'focus', running:false, secsLeft: pr.settings.pomo.focus*60, goalId: ag ? ag.id : null } : s.timer }
     })
   }
-  openNewProject() { this.setState({ showProjectModal: true, showProjectMenu: false, npName: '', npSubtitle: '', npHourGoal: 100, npDailyTarget: 2 }) }
+  openNewProject() { this.setState({ showCreate: true, showProjectMenu: false, ob: this.blankOb() }) }
+  cancelCreate() { this.setState({ showCreate: false, ob: this.blankOb() }) }
   saveProject() {
     const s = this.state
     if (!s.npName.trim()) return
@@ -272,7 +273,7 @@ export default class LearningTracker extends React.Component {
     return { id:uid(), name:ob.name.trim(), subtitle:(ob.subtitle||'').trim()||'مسار تعلّم جديد', color: ob.color || '#00d97e', goals, sessions:[], curriculum, settings:this.blankSettings(+ob.hourGoal||100, +ob.dailyTarget||2), activeGoalId: goals[0]?goals[0].id:null }
   }
   commitFirstProject(proj) {
-    this.commit(s => ({ projects:[proj], activeProjectId:proj.id, screen:'today', logGoalId: proj.goals[0]?proj.goals[0].id:'', timer:{...s.timer, mode:'focus', running:false, secsLeft:proj.settings.pomo.focus*60, goalId: proj.goals[0]?proj.goals[0].id:null}, ob:this.blankOb() }))
+    this.commit(s => ({ projects:[...s.projects, proj], activeProjectId:proj.id, screen:'today', showCreate:false, logGoalId: proj.goals[0]?proj.goals[0].id:'', timer:{...s.timer, mode:'focus', running:false, secsLeft:proj.settings.pomo.focus*60, goalId: proj.goals[0]?proj.goals[0].id:null}, ob:this.blankOb() }))
   }
   createFirstProject() {
     const ob = this.state.ob
@@ -650,6 +651,10 @@ export default class LearningTracker extends React.Component {
 
       // onboarding / project state
       noProjects, hasProjects: !noProjects,
+      showOnboarding: noProjects || st.showCreate, showApp: !noProjects && !st.showCreate,
+      isFirstProject: noProjects, showCancelCreate: !noProjects,
+      createTitle: noProjects ? 'أنشئ مسارك الأول' : 'أنشئ مسارًا جديدًا',
+      cancelCreate: () => this.cancelCreate(),
       obStep: ob.step, obIsDetails: ob.step===0, obIsGoals: ob.step===1, obIsSystems: ob.step===2,
       obShowBack: ob.step>0, obShowQuickCreate: ob.step<2 && !!ob.name.trim(), nextLabel: ob.step<2 ? 'التالي' : 'إنشاء المسار',
       obSteps,
@@ -747,18 +752,19 @@ export default class LearningTracker extends React.Component {
     return (
       <div data-look={v.look} dir="rtl" style={css('min-height:100vh;display:flex;background:var(--app-canvas);color:var(--app-text);font-family:var(--font-brand);'+v.themeVars)}>
 
-        {/* ONBOARDING (create first project) */}
-        {v.noProjects && (
+        {/* ONBOARDING (create project) */}
+        {v.showOnboarding && (
         <div style={css('min-height:100vh;width:100%;display:flex;align-items:flex-start;justify-content:center;overflow:auto;padding:54px 24px 90px;')}>
           <div style={css('width:100%;max-width:780px;')}>
             <div style={css('display:flex;align-items:center;gap:13px;margin-bottom:16px;')}>
               <div style={css('width:42px;height:42px;border-radius:12px;background:var(--app-accent);display:flex;align-items:center;justify-content:center;flex-shrink:0;')}>
                 <svg width="23" height="23" viewBox="0 0 24 24" fill="none" stroke="#06231a" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round"><path d="M12 3a9 9 0 1 0 9 9"></path><path d="M12 8v4l3 2"></path></svg>
               </div>
-              <div>
+              <div style={css('flex:1;')}>
                 <div style={css('font-size:12px;color:var(--app-faint);')}>مسار التعلّم</div>
-                <div style={css('font-size:25px;font-weight:700;letter-spacing:-0.3px;')}>أنشئ مسارك الأول</div>
+                <div style={css('font-size:25px;font-weight:700;letter-spacing:-0.3px;')}>{v.createTitle}</div>
               </div>
+              {v.showCancelCreate && <button onClick={v.cancelCreate} style={css('flex-shrink:0;background:var(--app-surface);color:var(--app-muted);border:1px solid var(--app-border);border-radius:11px;padding:10px 18px;font:600 13.5px var(--font-brand);cursor:pointer;')}>إلغاء</button>}
             </div>
             <div style={css('color:var(--app-muted);font-size:15px;margin-bottom:24px;line-height:1.6;')}>عرّف مشروعك، أضف أهدافه ومنهجه، ثم أنشئه. كل التفاصيل قابلة للتعديل في أي وقت.</div>
 
@@ -913,7 +919,7 @@ export default class LearningTracker extends React.Component {
         </div>
         )}
 
-        {v.hasProjects && (
+        {v.showApp && (
         <>
         {/* SIDEBAR */}
         <aside style={css('width:252px;flex-shrink:0;border-left:1px solid var(--app-border);padding:26px 18px;position:sticky;top:0;height:100vh;display:flex;flex-direction:column;gap:6px;')}>
