@@ -784,6 +784,7 @@ export default class LearningTracker extends React.Component {
       clearAll: () => this.clearAll(), loadDemo: () => this.loadDemo(),
       addMonth: () => this.addMonth(),
       timer:t, running:t.running, paused:!t.running,
+      focusLocked: t.running, focusLockAttr: t.running ? '1' : '0',
       focusDash:(focusFrac*942.48).toFixed(0)+' 943', focusTime: mm+':'+ssN, focusModeLabel: t.mode==='focus'?'تبقّى':'استراحة', sessionNum:t.sessionNum,
       tabFocus: t.mode==='focus'?tabActive:tabBase, tabShort: t.mode==='short'?tabActive:tabBase, tabLong: t.mode==='long'?tabActive:tabBase,
       setFocusMode: () => this.setMode('focus'), setShortMode: () => this.setMode('short'), setLongMode: () => this.setMode('long'),
@@ -821,7 +822,7 @@ export default class LearningTracker extends React.Component {
     const v = this.renderVals()
     const I = { fill: 'none', stroke: 'currentColor', strokeLinecap: 'round', strokeLinejoin: 'round' }
     return (
-      <div data-look={v.look} dir="rtl" style={css('min-height:100vh;display:flex;background:var(--app-canvas);color:var(--app-text);font-family:var(--font-brand);'+v.themeVars)}>
+      <div data-look={v.look} data-focus-lock={v.focusLockAttr} dir="rtl" style={css('min-height:100vh;display:flex;background:var(--app-canvas);color:var(--app-text);font-family:var(--font-brand);'+v.themeVars)}>
 
         {/* ONBOARDING (create project) */}
         {v.showOnboarding && (
@@ -993,7 +994,7 @@ export default class LearningTracker extends React.Component {
         {v.showApp && (
         <>
         {/* SIDEBAR */}
-        <aside style={css('width:252px;flex-shrink:0;border-left:1px solid var(--app-border);padding:26px 18px;position:sticky;top:0;height:100vh;display:flex;flex-direction:column;gap:6px;')}>
+        <aside className="focus-lockable" style={css('width:252px;flex-shrink:0;border-left:1px solid var(--app-border);padding:26px 18px;position:sticky;top:0;height:100vh;display:flex;flex-direction:column;gap:6px;')}>
           <div style={css('position:relative;padding-bottom:18px;')}>
             <button onClick={v.toggleProjectMenu} style={css('width:100%;display:flex;align-items:center;gap:11px;padding:9px 10px;border-radius:13px;background:var(--app-surface);border:1px solid var(--app-border);cursor:pointer;font-family:var(--font-brand);text-align:right;color:var(--app-text);')}>
               <div style={css('width:34px;height:34px;border-radius:10px;background:var(--app-accent);display:flex;align-items:center;justify-content:center;flex-shrink:0;')}>
@@ -1086,7 +1087,7 @@ export default class LearningTracker extends React.Component {
         {/* MAIN */}
         <main style={css('flex:1;min-width:0;display:flex;flex-direction:column;')}>
 
-          <header style={css('display:flex;align-items:center;justify-content:space-between;gap:24px;padding:16px 34px;border-bottom:1px solid var(--app-border);flex-wrap:wrap;')}>
+          <header className="focus-lockable" style={css('display:flex;align-items:center;justify-content:space-between;gap:24px;padding:16px 34px;border-bottom:1px solid var(--app-border);flex-wrap:wrap;')}>
             <div style={css('display:flex;align-items:center;gap:30px;flex-wrap:wrap;')}>
               <div style={css('min-width:150px;')}>
                 <div style={css('font-size:12px;color:var(--app-faint);margin-bottom:6px;')}>إجمالي ساعات التعلّم</div>
@@ -1263,6 +1264,12 @@ export default class LearningTracker extends React.Component {
           {/* SCREEN: FOCUS */}
           {v.isFocus && (
           <section style={css('flex:1;background:var(--focus-canvas);background-image:radial-gradient(circle at 50% 38%,var(--focus-glow),transparent 60%);padding:30px 34px 40px;display:flex;flex-direction:column;align-items:center;')}>
+            {v.focusLocked && (
+            <div style={css('display:inline-flex;align-items:center;gap:8px;background:var(--app-accent-soft);border:1px solid var(--app-accent);border-radius:999px;padding:6px 14px;margin-bottom:14px;')}>
+              <span style={css('width:7px;height:7px;border-radius:50%;background:var(--app-accent);')}></span>
+              <span style={css('font-size:12.5px;font-weight:600;color:var(--app-accent);')}>وضع التركيز نشِط · باقي الواجهة معطّلة حتى تُوقِف الجلسة</span>
+            </div>
+            )}
             <div style={css('display:inline-flex;background:var(--app-surface);border:1px solid var(--app-border);border-radius:13px;padding:5px;gap:4px;margin-bottom:6px;')}>
               <span onClick={v.setFocusMode} style={css(v.tabFocus)}>تركيز <span className="num">{v.pomoFocus}</span></span>
               <span onClick={v.setShortMode} style={css(v.tabShort)}>استراحة قصيرة <span className="num">{v.pomoShort}</span></span>
