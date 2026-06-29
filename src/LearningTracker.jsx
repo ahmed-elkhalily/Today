@@ -6,6 +6,26 @@ const AR_MONTHS = ['يناير','فبراير','مارس','أبريل','مايو
 const AR_DAYS = ['الأحد','الإثنين','الثلاثاء','الأربعاء','الخميس','الجمعة','السبت']
 const AR_DOW_SHORT = ['أحد','إثن','ثلا','أرب','خمي','جمع','سبت']
 const AR_ORD = ['الأول','الثاني','الثالث','الرابع','الخامس','السادس','السابع','الثامن','التاسع','العاشر','الحادي عشر','الثاني عشر']
+const PALETTE = [
+  { hex:'#00d97e', name:'زمردي' },
+  { hex:'#2dd4bf', name:'فيروزي' },
+  { hex:'#38bdf8', name:'سماوي' },
+  { hex:'#3b82f6', name:'أزرق' },
+  { hex:'#6366f1', name:'نيلي' },
+  { hex:'#8b5cf6', name:'بنفسجي' },
+  { hex:'#d946ef', name:'أرجواني' },
+  { hex:'#ec4899', name:'وردي' },
+]
+function hexToRgb(hex){ let h=(hex||'').replace('#',''); if(h.length===3) h=h.split('').map(c=>c+c).join(''); const n=parseInt(h,16); if(isNaN(n)||h.length!==6) return {r:0,g:217,b:126}; return { r:(n>>16)&255, g:(n>>8)&255, b:n&255 } }
+function themeVarsFor(hex){
+  let c = hexToRgb(hex)
+  let lum = (0.2126*c.r+0.7152*c.g+0.0722*c.b)/255
+  // lift colors too dark to read on the near-black UI
+  if (lum < 0.34){ const t = Math.min(0.75, (0.34-lum)/0.34); c = { r:Math.round(c.r+(255-c.r)*t), g:Math.round(c.g+(255-c.g)*t), b:Math.round(c.b+(255-c.b)*t) }; lum = (0.2126*c.r+0.7152*c.g+0.0722*c.b)/255 }
+  const hexAdj = '#'+[c.r,c.g,c.b].map(x=>x.toString(16).padStart(2,'0')).join('')
+  const on = lum>0.58 ? 'rgb('+Math.round(c.r*0.12)+','+Math.round(c.g*0.12)+','+Math.round(c.b*0.12)+')' : '#ffffff'
+  return '--app-accent:'+hexAdj+';--app-accent-on:'+on+';--app-accent-soft:rgba('+c.r+','+c.g+','+c.b+',0.14);--st-on:'+hexAdj+';--st-on-bg:rgba('+c.r+','+c.g+','+c.b+',0.15);--focus-glow:rgba('+c.r+','+c.g+','+c.b+',0.12);'
+}
 const DAY = 86400000
 const fmt1 = n => (Math.round(n * 10) / 10).toString()
 const dayStart = ms => { const d = new Date(ms); d.setHours(0,0,0,0); return d.getTime() }
@@ -38,13 +58,13 @@ export default class LearningTracker extends React.Component {
     }
     return { ...base, projects: [], activeProjectId: null, logGoalId: '', timer: { mode:'focus', secsLeft: 25*60, running:false, sessionNum:1, goalId:null, noise:'brown', volume:60 } }
   }
-  blankOb() { return { step:0, mode:'form', name:'', subtitle:'', hourGoal:100, dailyTarget:2, goals:[], stages:[], json:'', jsonError:'', jsonOk:false } }
+  blankOb() { return { step:0, mode:'form', name:'', subtitle:'', hourGoal:100, dailyTarget:2, color:'#00d97e', goals:[], stages:[], json:'', jsonError:'', jsonOk:false } }
   blankSettings(hourGoal, dailyTarget) { return { totalHourGoal: Math.max(1, hourGoal||100), dailyTarget: Math.max(0.5, dailyTarget||2), weeksTotal: 0, pomo: { focus:25, short:5, long:15 }, noise:'brown', volume:60 } }
-  emptyProjectShape() { return { id:'__none', name:'', subtitle:'', goals:[], sessions:[], curriculum:[], settings: this.blankSettings(100,2), activeGoalId:null } }
+  emptyProjectShape() { return { id:'__none', name:'', subtitle:'', color:'#00d97e', goals:[], sessions:[], curriculum:[], settings: this.blankSettings(100,2), activeGoalId:null } }
   seedProject() {
     const d = this.seedData()
     const first = d.goals.find(g => g.status === 'active') || d.goals[0] || null
-    return { id: 'p_fs', name: 'مسار Full-Stack', subtitle: 'من واجهات إلى Full-Stack', goals: d.goals, sessions: d.sessions, curriculum: d.curriculum, settings: d.settings, activeGoalId: first ? first.id : null }
+    return { id: 'p_fs', name: 'مسار Full-Stack', subtitle: 'من واجهات إلى Full-Stack', color:'#00d97e', goals: d.goals, sessions: d.sessions, curriculum: d.curriculum, settings: d.settings, activeGoalId: first ? first.id : null }
   }
   clearAll() { this.stopNoise(); if (confirm('مسح كل الأهداف والجلسات والبدء من جديد؟')) this.setState(this.buildState(false), () => this.persist()) }
   loadDemo() { this.stopNoise(); this.setState(this.buildState(true), () => this.persist()) }
@@ -249,7 +269,7 @@ export default class LearningTracker extends React.Component {
       return { id:uid(), title:g.title.trim(), hourBudget:budget, status: g.status==='done'?'done':'active', createdAt:Date.now(), deadline, subTasks:tasks }
     })
     const curriculum = (ob.stages||[]).filter(s=>(s.title||'').trim()||(s.weeks||[]).some(w=>(w.topic||'').trim()||(w.build||'').trim())).map(s=>({ id:uid(), title:(s.title||'').trim()||'مرحلة', weeks:(s.weeks||[]).filter(w=>(w.topic||'').trim()||(w.build||'').trim()).map(w=>({id:uid(),topic:(w.topic||'').trim(),build:(w.build||'').trim(),done:!!w.done})) }))
-    return { id:uid(), name:ob.name.trim(), subtitle:(ob.subtitle||'').trim()||'مسار تعلّم جديد', goals, sessions:[], curriculum, settings:this.blankSettings(+ob.hourGoal||100, +ob.dailyTarget||2), activeGoalId: goals[0]?goals[0].id:null }
+    return { id:uid(), name:ob.name.trim(), subtitle:(ob.subtitle||'').trim()||'مسار تعلّم جديد', color: ob.color || '#00d97e', goals, sessions:[], curriculum, settings:this.blankSettings(+ob.hourGoal||100, +ob.dailyTarget||2), activeGoalId: goals[0]?goals[0].id:null }
   }
   commitFirstProject(proj) {
     this.commit(s => ({ projects:[proj], activeProjectId:proj.id, screen:'today', logGoalId: proj.goals[0]?proj.goals[0].id:'', timer:{...s.timer, mode:'focus', running:false, secsLeft:proj.settings.pomo.focus*60, goalId: proj.goals[0]?proj.goals[0].id:null}, ob:this.blankOb() }))
@@ -270,6 +290,7 @@ export default class LearningTracker extends React.Component {
     const numOk = (v) => v === undefined || v === null || v === '' || (!isNaN(+v) && +v >= 0)
     if (!numOk(d.hourGoal)) return { ok:false, error:'"hourGoal" يجب أن يكون رقمًا.', value:null }
     if (!numOk(d.dailyTarget)) return { ok:false, error:'"dailyTarget" يجب أن يكون رقمًا.', value:null }
+    if (d.color !== undefined && (typeof d.color !== 'string' || !/^#([0-9a-fA-F]{3}|[0-9a-fA-F]{6})$/.test(d.color))) return { ok:false, error:'"color" يجب أن يكون لونًا بصيغة #RRGGBB.', value:null }
     if (d.goals !== undefined && !Array.isArray(d.goals)) return { ok:false, error:'"goals" يجب أن تكون مصفوفة [ ].', value:null }
     if (d.stages !== undefined && !Array.isArray(d.stages)) return { ok:false, error:'"stages" يجب أن تكون مصفوفة [ ].', value:null }
     const goals = d.goals || []
@@ -298,6 +319,7 @@ export default class LearningTracker extends React.Component {
       subtitle: d.subtitle ? String(d.subtitle).trim() : '',
       hourGoal: d.hourGoal ? +d.hourGoal : 100,
       dailyTarget: d.dailyTarget ? +d.dailyTarget : 2,
+      color: d.color || '',
       goals: goals.map(g => ({ title:String(g.title), budget: g.budget!=null?String(g.budget):'', deadline: g.deadline||'', status:g.status, tasks:(g.tasks||[]).map(t=>({ label:String(t.label), hours: t.hours!=null?String(t.hours):'', done:!!t.done })) })),
       stages: stages.map(s => ({ title: s.title?String(s.title):'', weeks:(s.weeks||[]).map(w=>({ topic: w.topic?String(w.topic):'', build: w.build?String(w.build):'', done:!!w.done })) })),
     }
@@ -329,7 +351,8 @@ export default class LearningTracker extends React.Component {
   createFromJson() {
     const r = this.validateObJson(this.state.ob.json)
     if (!r.ok) { this.setState(s => ({ ob: { ...s.ob, jsonError: r.error, jsonOk:false } })); return }
-    this.commitFirstProject(this.buildProjectFromOb(r.value))
+    const v = r.value; v.color = v.color || this.state.ob.color || '#00d97e'
+    this.commitFirstProject(this.buildProjectFromOb(v))
   }
 
   // ---------- new goal ----------
@@ -412,6 +435,9 @@ export default class LearningTracker extends React.Component {
     const set = p.settings
     const look = st.look || this.props.look || 'slate'
     const screen = st.screen
+    const themeHex = (noProjects || st.showCreate) ? (st.ob.color || '#00d97e') : (p.color || '#00d97e')
+    const themeVars = themeVarsFor(themeHex)
+    const aRGB = (c => c.r+','+c.g+','+c.b)(hexToRgb(themeHex))
     const navBase = 'display:flex;align-items:center;gap:13px;width:100%;padding:11px 14px;border:none;border-radius:12px;cursor:pointer;font-family:var(--font-brand);font-size:15.5px;font-weight:600;text-align:right;background:transparent;color:var(--app-muted);'
     const navActive = 'display:flex;align-items:center;gap:13px;width:100%;padding:11px 14px;border:none;border-radius:12px;cursor:pointer;font-family:var(--font-brand);font-size:15.5px;font-weight:700;text-align:right;background:var(--app-surface-2);color:var(--app-text);'
     const nav = k => (screen === k ? navActive : navBase)
@@ -525,7 +551,7 @@ export default class LearningTracker extends React.Component {
 
     let maxHeat = 1; const heatDays = []
     for (let i=55;i>=0;i--){ const ds = dayStart(Date.now()-i*DAY); const h = sessions.filter(x=>dayStart(x.date)===ds).reduce((a,b)=>a+b.hours,0); heatDays.push(h); if(h>maxHeat)maxHeat=h }
-    const heat = heatDays.map(h => { const on = h>0; const op = Math.min(0.95, 0.22 + (h/maxHeat)*0.78).toFixed(2); return { s:'aspect-ratio:1;border-radius:4px;background:'+(on?'rgba(0,217,126,'+op+')':'var(--app-surface-2)')+';' } })
+    const heat = heatDays.map(h => { const on = h>0; const op = Math.min(0.95, 0.22 + (h/maxHeat)*0.78).toFixed(2); return { s:'aspect-ratio:1;border-radius:4px;background:'+(on?'rgba('+aRGB+','+op+')':'var(--app-surface-2)')+';' } })
 
     const history = [...sessions].sort((a,b)=>b.date-a.date).slice(0,40).map(x => {
       const g = p.goals.find(gg=>gg.id===x.goalId); const d = new Date(x.date)
@@ -611,6 +637,16 @@ export default class LearningTracker extends React.Component {
       isToday:screen==='today', isGoals:screen==='goals', isFocus:screen==='focus', isLog:screen==='log', isCurr:screen==='curr', isStats:screen==='stats',
       goToday:this.go('today'), goGoals:this.go('goals'), goFocus:this.go('focus'), goLog:this.go('log'), goCurr:this.go('curr'), goStats:this.go('stats'),
       navToday:nav('today'), navGoals:nav('goals'), navFocus:nav('focus'), navLog:nav('log'), navCurr:nav('curr'), navStats:nav('stats'),
+
+      // theming
+      themeVars,
+      obColor: ob.color || '#00d97e',
+      obCustomStyle: 'position:relative;width:38px;height:38px;border-radius:11px;display:flex;align-items:center;justify-content:center;cursor:pointer;color:var(--app-faint);background:'+( !PALETTE.some(c=>c.hex===(ob.color||'#00d97e')) ? (ob.color||'#00d97e') : 'var(--app-surface-2)')+';border:3px solid '+(!PALETTE.some(c=>c.hex===(ob.color||'#00d97e'))?'var(--app-text)':'var(--app-border)')+';',
+      obSetColorInput: e => this.setObField('color', e.target.value),
+      obColorOptions: PALETTE.map(c => ({
+        name: c.name, pick: () => this.setObField('color', c.hex),
+        style: 'width:38px;height:38px;border-radius:11px;cursor:pointer;background:'+c.hex+';border:3px solid '+((ob.color||'#00d97e')===c.hex?'var(--app-text)':'transparent')+';box-shadow:0 0 0 1px var(--app-border);transition:transform .12s;'+((ob.color||'#00d97e')===c.hex?'transform:scale(1.08);':''),
+      })),
 
       // onboarding / project state
       noProjects, hasProjects: !noProjects,
@@ -709,7 +745,7 @@ export default class LearningTracker extends React.Component {
     const v = this.renderVals()
     const I = { fill: 'none', stroke: 'currentColor', strokeLinecap: 'round', strokeLinejoin: 'round' }
     return (
-      <div data-look={v.look} dir="rtl" style={css('min-height:100vh;display:flex;background:var(--app-canvas);color:var(--app-text);font-family:var(--font-brand);')}>
+      <div data-look={v.look} dir="rtl" style={css('min-height:100vh;display:flex;background:var(--app-canvas);color:var(--app-text);font-family:var(--font-brand);'+v.themeVars)}>
 
         {/* ONBOARDING (create first project) */}
         {v.noProjects && (
@@ -725,6 +761,22 @@ export default class LearningTracker extends React.Component {
               </div>
             </div>
             <div style={css('color:var(--app-muted);font-size:15px;margin-bottom:24px;line-height:1.6;')}>عرّف مشروعك، أضف أهدافه ومنهجه، ثم أنشئه. كل التفاصيل قابلة للتعديل في أي وقت.</div>
+
+            <div style={css('background:var(--app-surface);border:1px solid var(--app-border);border-radius:16px;padding:18px 20px;margin-bottom:16px;')}>
+              <div style={css('display:flex;align-items:center;justify-content:space-between;margin-bottom:13px;')}>
+                <label style={css('font-size:13.5px;font-weight:700;color:var(--app-text);')}>لون المسار</label>
+                <span style={css('font-size:12px;color:var(--app-faint);')}>يصبغ الواجهة بالكامل</span>
+              </div>
+              <div style={css('display:flex;gap:10px;flex-wrap:wrap;align-items:center;')}>
+                {v.obColorOptions.map((c, i) => (
+                  <button key={i} onClick={c.pick} title={c.name} style={css(c.style)}></button>
+                ))}
+                <label style={css(v.obCustomStyle)}>
+                  <input type="color" value={v.obColor} onInput={v.obSetColorInput} style={css('position:absolute;inset:0;opacity:0;cursor:pointer;width:100%;height:100%;border:none;padding:0;')} />
+                  <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ pointerEvents:'none' }}><path d="M12 5v14"></path><path d="M5 12h14"></path></svg>
+                </label>
+              </div>
+            </div>
 
             <div style={css('display:flex;gap:5px;padding:5px;background:var(--app-surface);border:1px solid var(--app-border);border-radius:12px;margin-bottom:20px;')}>
               <button onClick={v.setFormMode} style={css(v.formTabStyle)}>نموذج تفاعلي</button>
