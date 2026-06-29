@@ -55,9 +55,9 @@ export default class LearningTracker extends React.Component {
     if (demo) {
       const proj = this.seedProject()
       const first = proj.goals.find(g => g.status === 'active') || proj.goals[0] || null
-      return { ...base, projects: [proj], activeProjectId: proj.id, logGoalId: first ? first.id : '', timer: { mode:'focus', secsLeft: proj.settings.pomo.focus*60, running:false, sessionNum:1, goalId: first ? first.id : null, noise: proj.settings.noise, volume: proj.settings.volume } }
+      return { ...base, projects: [proj], activeProjectId: proj.id, logGoalId: first ? first.id : '', timer: { mode:'focus', secsLeft: proj.settings.pomo.focus*60, running:false, endsAt:null, sessionNum:1, goalId: first ? first.id : null, noise: proj.settings.noise, volume: proj.settings.volume } }
     }
-    return { ...base, projects: [], activeProjectId: null, logGoalId: '', timer: { mode:'focus', secsLeft: 25*60, running:false, sessionNum:1, goalId:null, noise:'brown', volume:60 } }
+    return { ...base, projects: [], activeProjectId: null, logGoalId: '', timer: { mode:'focus', secsLeft: 25*60, running:false, endsAt:null, sessionNum:1, goalId:null, noise:'brown', volume:60 } }
   }
   blankOb() { return { step:0, mode:'form', name:'', subtitle:'', hourGoal:100, dailyTarget:2, color:'#00d97e', goals:[], stages:[], json:'', jsonError:'', jsonOk:false } }
   blankSettings(hourGoal, dailyTarget) { return { totalHourGoal: Math.max(1, hourGoal||100), dailyTarget: Math.max(0.5, dailyTarget||2), weeksTotal: 0, pomo: { focus:25, short:5, long:15 }, noise:'brown', volume:60 } }
@@ -141,7 +141,11 @@ export default class LearningTracker extends React.Component {
           const apid = (d.activeProjectId && d.projects.some(p=>p.id===d.activeProjectId)) ? d.activeProjectId : d.projects[0].id
           const ap = d.projects.find(p=>p.id===apid)
           const ag = ap.goals.find(g=>g.status==='active') || ap.goals[0] || null
-          this.setState(s => ({ projects: d.projects, activeProjectId: apid, look: d.look || s.look, logGoalId: ag?ag.id:'', timer: { ...s.timer, goalId: ag?ag.id:null, secsLeft: ap.settings.pomo.focus*60, noise: ap.settings.noise, volume: ap.settings.volume } }))
+          this.setState(s => {
+            let timer = d.timer ? { ...d.timer } : { ...s.timer, goalId: ag?ag.id:null, secsLeft: ap.settings.pomo.focus*60, noise: ap.settings.noise, volume: ap.settings.volume }
+            if (timer.running && timer.endsAt) timer.secsLeft = Math.max(0, Math.round((timer.endsAt - Date.now())/1000))
+            return { projects: d.projects, activeProjectId: apid, look: d.look || s.look, logGoalId: ag?ag.id:'', timer }
+          }, () => { if (this.state.timer.running && this.state.timer.mode === 'focus') this.startNoise() })
         }
       } else {
         const old = localStorage.getItem('lt_state_v6')
@@ -161,8 +165,8 @@ export default class LearningTracker extends React.Component {
 
   persist() {
     try {
-      const { projects, activeProjectId, look } = this.state
-      localStorage.setItem(KEY, JSON.stringify({ projects, activeProjectId, look }))
+      const { projects, activeProjectId, look, timer } = this.state
+      localStorage.setItem(KEY, JSON.stringify({ projects, activeProjectId, look, timer }))
     } catch (e) {}
   }
   commit(updater) { this.setState(updater, () => this.persist()) }
@@ -397,20 +401,27 @@ export default class LearningTracker extends React.Component {
 
   // ---------- focus timer ----------
   modeSecs(mode) { const p = (this.ap() || this.emptyProjectShape()).settings.pomo; return (mode === 'focus' ? p.focus : mode === 'short' ? p.short : p.long) * 60 }
-  setMode(mode) { this.stopNoise(); this.setState(s => ({ timer: { ...s.timer, mode, secsLeft: this.modeSecs(mode), running: false } })) }
+  setMode(mode) { this.stopNoise(); this.setState(s => ({ timer: { ...s.timer, mode, secsLeft: this.modeSecs(mode), running: false, endsAt: null } }), () => this.persist()) }
   setFocusMinutes(min) { const m = Math.max(1, Math.min(180, Math.round(+min || 0))); this.commit(s => { const onFocus = s.timer.mode === 'focus' && !s.timer.running; return { projects: s.projects.map(p => p.id !== s.activeProjectId ? p : { ...p, settings: { ...p.settings, pomo: { ...p.settings.pomo, focus: m } } }), timer: onFocus ? { ...s.timer, secsLeft: m*60 } : s.timer } }) }
   toggleTimer() {
     this.setState(s => {
       const running = !s.timer.running
-      return { timer: { ...s.timer, running } }
-    }, () => { if (this.state.timer.running && this.state.timer.mode === 'focus') this.startNoise(); else this.stopNoise() })
+      let { secsLeft, endsAt } = s.timer
+      if (running) { endsAt = Date.now() + secsLeft*1000 }
+      else { if (endsAt) secsLeft = Math.max(0, Math.round((endsAt - Date.now())/1000)); endsAt = null }
+      return { timer: { ...s.timer, running, secsLeft, endsAt } }
+    }, () => { this.persist(); if (this.state.timer.running && this.state.timer.mode === 'focus') this.startNoise(); else this.stopNoise() })
   }
-  resetTimer() { this.stopNoise(); this.setState(s => ({ timer: { ...s.timer, secsLeft: this.modeSecs(s.timer.mode), running: false } })) }
+  resetTimer() { this.stopNoise(); this.setState(s => ({ timer: { ...s.timer, secsLeft: this.modeSecs(s.timer.mode), running: false, endsAt: null } }), () => this.persist()) }
   skipTimer() { this.completeBlock(true) }
   tick() {
     const t = this.state.timer
     if (!t.running) return
-    if (t.secsLeft > 1) { this.setState({ timer: { ...t, secsLeft: t.secsLeft - 1 } }) }
+    if (t.endsAt) {
+      const left = Math.round((t.endsAt - Date.now())/1000)
+      if (left <= 0) { this.completeBlock(false) }
+      else if (left !== t.secsLeft) { this.setState({ timer: { ...t, secsLeft: left } }) }
+    } else if (t.secsLeft > 1) { this.setState({ timer: { ...t, secsLeft: t.secsLeft - 1 } }) }
     else { this.completeBlock(false) }
   }
   completeBlock(skipped) {
@@ -420,10 +431,10 @@ export default class LearningTracker extends React.Component {
       const dur = this.modeSecs('focus')
       const h = +(dur / 3600).toFixed(2)
       const sess = { id: uid(), date: Date.now(), hours: h, learnHours: +(h*0.6).toFixed(2), buildHours: +(h*0.4).toFixed(2), goalId: t.goalId, note: '', source: 'pomodoro' }
-      this.commit(st => ({ projects: st.projects.map(p => p.id !== st.activeProjectId ? p : { ...p, sessions: [sess, ...p.sessions] }), timer: { ...st.timer, mode:'short', secsLeft: this.modeSecs('short'), running:false, sessionNum: st.timer.sessionNum + 1 } }))
+      this.commit(st => ({ projects: st.projects.map(p => p.id !== st.activeProjectId ? p : { ...p, sessions: [sess, ...p.sessions] }), timer: { ...st.timer, mode:'short', secsLeft: this.modeSecs('short'), running:false, endsAt:null, sessionNum: st.timer.sessionNum + 1 } }))
     } else {
       const next = t.mode === 'focus' ? 'short' : 'focus'
-      this.setState({ timer: { ...t, mode: next, secsLeft: this.modeSecs(next), running: false } })
+      this.setState({ timer: { ...t, mode: next, secsLeft: this.modeSecs(next), running: false, endsAt:null } }, () => this.persist())
     }
   }
 
@@ -1270,13 +1281,13 @@ export default class LearningTracker extends React.Component {
               <span style={css('font-size:12.5px;font-weight:600;color:var(--app-accent);')}>وضع التركيز نشِط · باقي الواجهة معطّلة حتى تُوقِف الجلسة</span>
             </div>
             )}
-            <div style={css('display:inline-flex;background:var(--app-surface);border:1px solid var(--app-border);border-radius:13px;padding:5px;gap:4px;margin-bottom:6px;')}>
+            <div className="focus-lockable" style={css('display:inline-flex;background:var(--app-surface);border:1px solid var(--app-border);border-radius:13px;padding:5px;gap:4px;margin-bottom:6px;')}>
               <span onClick={v.setFocusMode} style={css(v.tabFocus)}>تركيز <span className="num">{v.pomoFocus}</span></span>
               <span onClick={v.setShortMode} style={css(v.tabShort)}>استراحة قصيرة <span className="num">{v.pomoShort}</span></span>
               <span onClick={v.setLongMode} style={css(v.tabLong)}>استراحة طويلة <span className="num">{v.pomoLong}</span></span>
             </div>
 
-            <div style={css('display:flex;align-items:center;gap:10px;margin-top:14px;flex-wrap:wrap;justify-content:center;')}>
+            <div className="focus-lockable" style={css('display:flex;align-items:center;gap:10px;margin-top:14px;flex-wrap:wrap;justify-content:center;')}>
               <span style={css('font-size:12px;color:var(--app-faint);')}>مدة جلسة التركيز</span>
               <div style={css('display:inline-flex;gap:6px;')}>
                 {v.durationPresets.map((d, i) => (
