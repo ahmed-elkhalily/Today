@@ -37,7 +37,7 @@ export default class LearningTracker extends React.Component {
     }
     return { ...base, projects: [], activeProjectId: null, logGoalId: '', timer: { mode:'focus', secsLeft: 25*60, running:false, sessionNum:1, goalId:null, noise:'brown', volume:60 } }
   }
-  blankOb() { return { step:0, name:'', subtitle:'', hourGoal:100, dailyTarget:2, goals:[], stages:[] } }
+  blankOb() { return { step:0, mode:'form', name:'', subtitle:'', hourGoal:100, dailyTarget:2, goals:[], stages:[], json:'', jsonError:'', jsonOk:false } }
   blankSettings(hourGoal, dailyTarget) { return { totalHourGoal: Math.max(1, hourGoal||100), dailyTarget: Math.max(0.5, dailyTarget||2), weeksTotal: 0, pomo: { focus:25, short:5, long:15 }, noise:'brown', volume:60 } }
   emptyProjectShape() { return { id:'__none', name:'', subtitle:'', goals:[], sessions:[], curriculum:[], settings: this.blankSettings(100,2), activeGoalId:null } }
   seedProject() {
@@ -239,19 +239,96 @@ export default class LearningTracker extends React.Component {
   addObWeek(sid) { this.setState(s => ({ ob: { ...s.ob, stages: s.ob.stages.map(x=>x.id!==sid?x:{...x, weeks:[...x.weeks,{id:uid(),topic:'',build:''}]}) } })) }
   removeObWeek(sid, wid) { this.setState(s => ({ ob: { ...s.ob, stages: s.ob.stages.map(x=>x.id!==sid?x:{...x, weeks:x.weeks.filter(w=>w.id!==wid)}) } })) }
   setObWeek(sid, wid, f, v) { this.setState(s => ({ ob: { ...s.ob, stages: s.ob.stages.map(x=>x.id!==sid?x:{...x, weeks:x.weeks.map(w=>w.id!==wid?w:{...w,[f]:v})}) } })) }
-  createFirstProject() {
-    const ob = this.state.ob
-    if (!ob.name.trim()) { this.setOb({ step: 0 }); return }
-    const goals = ob.goals.filter(g=>g.title.trim()).map(g => {
-      const tasks = g.tasks.filter(t=>t.label.trim()).map(t=>({id:uid(),label:t.label.trim(),done:false,est:+t.hours||0}))
+  buildProjectFromOb(ob) {
+    const goals = ob.goals.filter(g=>(g.title||'').trim()).map(g => {
+      const tasks = (g.tasks||[]).filter(t=>(t.label||'').trim()).map(t=>({id:uid(),label:t.label.trim(),done:!!t.done,est:+t.hours||0}))
       const taskSum = tasks.reduce((a,t)=>a+t.est,0)
       const budget = taskSum>0 ? taskSum : Math.max(1, +g.budget||1)
       const deadline = g.deadline ? new Date(g.deadline+'T12:00:00').getTime() : Date.now()+14*DAY
-      return { id:uid(), title:g.title.trim(), hourBudget:budget, status:'active', createdAt:Date.now(), deadline, subTasks:tasks }
+      return { id:uid(), title:g.title.trim(), hourBudget:budget, status: g.status==='done'?'done':'active', createdAt:Date.now(), deadline, subTasks:tasks }
     })
-    const curriculum = ob.stages.filter(s=>s.title.trim()||s.weeks.some(w=>w.topic.trim()||w.build.trim())).map(s=>({ id:uid(), title:s.title.trim()||'مرحلة', weeks:s.weeks.filter(w=>w.topic.trim()||w.build.trim()).map(w=>({id:uid(),topic:w.topic.trim(),build:w.build.trim(),done:false})) }))
-    const proj = { id:uid(), name:ob.name.trim(), subtitle:ob.subtitle.trim()||'مسار تعلّم جديد', goals, sessions:[], curriculum, settings:this.blankSettings(+ob.hourGoal||100, +ob.dailyTarget||2), activeGoalId: goals[0]?goals[0].id:null }
-    this.commit(s => ({ projects:[proj], activeProjectId:proj.id, screen:'today', logGoalId: goals[0]?goals[0].id:'', timer:{...s.timer, mode:'focus', running:false, secsLeft:proj.settings.pomo.focus*60, goalId: goals[0]?goals[0].id:null}, ob:this.blankOb() }))
+    const curriculum = (ob.stages||[]).filter(s=>(s.title||'').trim()||(s.weeks||[]).some(w=>(w.topic||'').trim()||(w.build||'').trim())).map(s=>({ id:uid(), title:(s.title||'').trim()||'مرحلة', weeks:(s.weeks||[]).filter(w=>(w.topic||'').trim()||(w.build||'').trim()).map(w=>({id:uid(),topic:(w.topic||'').trim(),build:(w.build||'').trim(),done:!!w.done})) }))
+    return { id:uid(), name:ob.name.trim(), subtitle:(ob.subtitle||'').trim()||'مسار تعلّم جديد', goals, sessions:[], curriculum, settings:this.blankSettings(+ob.hourGoal||100, +ob.dailyTarget||2), activeGoalId: goals[0]?goals[0].id:null }
+  }
+  commitFirstProject(proj) {
+    this.commit(s => ({ projects:[proj], activeProjectId:proj.id, screen:'today', logGoalId: proj.goals[0]?proj.goals[0].id:'', timer:{...s.timer, mode:'focus', running:false, secsLeft:proj.settings.pomo.focus*60, goalId: proj.goals[0]?proj.goals[0].id:null}, ob:this.blankOb() }))
+  }
+  createFirstProject() {
+    const ob = this.state.ob
+    if (!ob.name.trim()) { this.setOb({ step: 0 }); return }
+    this.commitFirstProject(this.buildProjectFromOb(ob))
+  }
+
+  // ---------- JSON import (create from object) ----------
+  validateObJson(text) {
+    if (!text || !text.trim()) return { ok:false, error:'ألصق كائن JSON للمشروع أوّلاً.', value:null }
+    let d
+    try { d = JSON.parse(text) } catch(e) { return { ok:false, error:'JSON غير صالح: '+e.message, value:null } }
+    if (typeof d !== 'object' || Array.isArray(d) || d === null) return { ok:false, error:'يجب أن يكون الجذر كائنًا { }.', value:null }
+    if (!d.name || typeof d.name !== 'string' || !d.name.trim()) return { ok:false, error:'الحقل "name" مطلوب ويجب أن يكون نصًا غير فارغ.', value:null }
+    const numOk = (v) => v === undefined || v === null || v === '' || (!isNaN(+v) && +v >= 0)
+    if (!numOk(d.hourGoal)) return { ok:false, error:'"hourGoal" يجب أن يكون رقمًا.', value:null }
+    if (!numOk(d.dailyTarget)) return { ok:false, error:'"dailyTarget" يجب أن يكون رقمًا.', value:null }
+    if (d.goals !== undefined && !Array.isArray(d.goals)) return { ok:false, error:'"goals" يجب أن تكون مصفوفة [ ].', value:null }
+    if (d.stages !== undefined && !Array.isArray(d.stages)) return { ok:false, error:'"stages" يجب أن تكون مصفوفة [ ].', value:null }
+    const goals = d.goals || []
+    for (let i=0;i<goals.length;i++) {
+      const g = goals[i]; const n = i+1
+      if (typeof g !== 'object' || g===null || Array.isArray(g)) return { ok:false, error:'الهدف رقم '+n+' يجب أن يكون كائنًا.', value:null }
+      if (!g.title || !String(g.title).trim()) return { ok:false, error:'الهدف رقم '+n+' ينقصه "title".', value:null }
+      if (!numOk(g.budget)) return { ok:false, error:'"budget" للهدف رقم '+n+' يجب أن يكون رقمًا.', value:null }
+      if (g.tasks !== undefined && !Array.isArray(g.tasks)) return { ok:false, error:'"tasks" للهدف رقم '+n+' يجب أن تكون مصفوفة.', value:null }
+      const tasks = g.tasks || []
+      for (let j=0;j<tasks.length;j++) {
+        const t = tasks[j]
+        if (typeof t !== 'object' || t===null) return { ok:false, error:'مهمة في الهدف '+n+' غير صالحة.', value:null }
+        if (!t.label || !String(t.label).trim()) return { ok:false, error:'مهمة في الهدف '+n+' ينقصها "label".', value:null }
+        if (!numOk(t.hours)) return { ok:false, error:'"hours" لمهمة في الهدف '+n+' يجب أن يكون رقمًا.', value:null }
+      }
+    }
+    const stages = d.stages || []
+    for (let i=0;i<stages.length;i++) {
+      const s = stages[i]; const n = i+1
+      if (typeof s !== 'object' || s===null || Array.isArray(s)) return { ok:false, error:'المرحلة رقم '+n+' يجب أن تكون كائنًا.', value:null }
+      if (s.weeks !== undefined && !Array.isArray(s.weeks)) return { ok:false, error:'"weeks" للمرحلة رقم '+n+' يجب أن تكون مصفوفة.', value:null }
+    }
+    const value = {
+      name: String(d.name).trim(),
+      subtitle: d.subtitle ? String(d.subtitle).trim() : '',
+      hourGoal: d.hourGoal ? +d.hourGoal : 100,
+      dailyTarget: d.dailyTarget ? +d.dailyTarget : 2,
+      goals: goals.map(g => ({ title:String(g.title), budget: g.budget!=null?String(g.budget):'', deadline: g.deadline||'', status:g.status, tasks:(g.tasks||[]).map(t=>({ label:String(t.label), hours: t.hours!=null?String(t.hours):'', done:!!t.done })) })),
+      stages: stages.map(s => ({ title: s.title?String(s.title):'', weeks:(s.weeks||[]).map(w=>({ topic: w.topic?String(w.topic):'', build: w.build?String(w.build):'', done:!!w.done })) })),
+    }
+    const gc = value.goals.length, sc = value.stages.length
+    return { ok:true, error:'جاهز للإنشاء · '+gc+' أهداف · '+sc+' مراحل', value }
+  }
+  setObMode(mode) { this.setState(s => ({ ob: { ...s.ob, mode } })) }
+  setObJson(text) {
+    const r = this.validateObJson(text)
+    this.setState(s => ({ ob: { ...s.ob, json: text, jsonError: r.error, jsonOk: r.ok } }))
+  }
+  loadJsonSample() {
+    const sample = {
+      name: 'مسار Full-Stack',
+      subtitle: 'من واجهات إلى Full-Stack',
+      hourGoal: 216,
+      dailyTarget: 3,
+      goals: [
+        { title: 'أساسيات JavaScript', budget: 20, deadline: '2026-08-15', tasks: [ { label: 'المتغيرات والدوال', hours: 6 }, { label: 'الوعود والتزامن', hours: 8 } ] },
+        { title: 'بناء واجهة React', budget: 30, tasks: [] }
+      ],
+      stages: [
+        { title: 'الشهر التأسيسي', weeks: [ { topic: 'أساسيات الويب', build: 'صفحة شخصية' }, { topic: 'JavaScript', build: 'آلة حاسبة' } ] },
+        { title: 'شهر الواجهات', weeks: [ { topic: 'React', build: 'لوحة مهام' } ] }
+      ]
+    }
+    this.setObJson(JSON.stringify(sample, null, 2))
+  }
+  createFromJson() {
+    const r = this.validateObJson(this.state.ob.json)
+    if (!r.ok) { this.setState(s => ({ ob: { ...s.ob, jsonError: r.error, jsonOk:false } })); return }
+    this.commitFirstProject(this.buildProjectFromOb(r.value))
   }
 
   // ---------- new goal ----------
@@ -540,6 +617,14 @@ export default class LearningTracker extends React.Component {
       addObGoal: ()=>this.addObGoal(), addObStage: ()=>this.addObStage(),
       obBack: ()=>this.obGoStep(ob.step-1), obNext: ()=>this.obNext(),
       createFirstProject: ()=>this.createFirstProject(),
+      obMode: ob.mode, obFormMode: ob.mode==='form', obJsonMode: ob.mode==='json',
+      setFormMode: ()=>this.setObMode('form'), setJsonMode: ()=>this.setObMode('json'),
+      formTabStyle: 'flex:1;padding:9px;border-radius:9px;border:none;cursor:pointer;font:600 13.5px var(--font-brand);'+(ob.mode==='form'?'background:var(--app-elev);color:var(--app-text);box-shadow:0 1px 3px rgba(0,0,0,0.3);':'background:transparent;color:var(--app-faint);'),
+      jsonTabStyle: 'flex:1;padding:9px;border-radius:9px;border:none;cursor:pointer;font:600 13.5px var(--font-brand);'+(ob.mode==='json'?'background:var(--app-elev);color:var(--app-text);box-shadow:0 1px 3px rgba(0,0,0,0.3);':'background:transparent;color:var(--app-faint);'),
+      obJson: ob.json, setObJson: e=>this.setObJson(e.target.value),
+      obJsonError: ob.jsonError, obJsonOk: ob.jsonOk, obHasJson: !!ob.json.trim(),
+      jsonMsgStyle: 'font-size:12.5px;margin-top:10px;padding:10px 12px;border-radius:10px;line-height:1.5;'+(ob.jsonOk?'background:var(--app-accent-soft);color:var(--app-accent);':'background:rgba(229,86,78,0.12);color:#f08a84;'),
+      loadJsonSample: ()=>this.loadJsonSample(), createFromJson: ()=>this.createFromJson(),
 
       // project switcher / topbar
       projName: p.name, projSubtitle: p.subtitle, projCount: st.projects.length, projectList,
@@ -633,6 +718,12 @@ export default class LearningTracker extends React.Component {
             </div>
             <div style={css('color:var(--app-muted);font-size:15px;margin-bottom:24px;line-height:1.6;')}>عرّف مشروعك، أضف أهدافه ومنهجه، ثم أنشئه. كل التفاصيل قابلة للتعديل في أي وقت.</div>
 
+            <div style={css('display:flex;gap:5px;padding:5px;background:var(--app-surface);border:1px solid var(--app-border);border-radius:12px;margin-bottom:20px;')}>
+              <button onClick={v.setFormMode} style={css(v.formTabStyle)}>نموذج تفاعلي</button>
+              <button onClick={v.setJsonMode} style={css(v.jsonTabStyle)}>لصق JSON</button>
+            </div>
+
+            {v.obFormMode && (<>
             <div style={css('display:flex;gap:9px;margin-bottom:22px;flex-wrap:wrap;')}>
               {v.obSteps.map((s, i) => (
                 <div key={i} onClick={s.go} style={css(s.pillStyle)}><span className="num" style={css(s.numStyle)}>{s.num}</span>{s.label}</div>
@@ -741,6 +832,23 @@ export default class LearningTracker extends React.Component {
               {v.obShowQuickCreate && <button onClick={v.createFirstProject} style={css('background:transparent;color:var(--app-muted);border:none;font:600 14px var(--font-brand);cursor:pointer;padding:13px 10px;')}>إنشاء الآن</button>}
               <button onClick={v.obNext} style={css('background:var(--app-accent);color:var(--app-accent-on);border:none;border-radius:12px;padding:13px 26px;font:700 14px var(--font-brand);cursor:pointer;')}>{v.nextLabel}</button>
             </div>
+            </>)}
+
+            {v.obJsonMode && (
+            <div style={css('background:var(--app-surface);border:1px solid var(--app-border);border-radius:18px;padding:26px;')}>
+              <div style={css('display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:4px;')}>
+                <div style={css('font-size:17px;font-weight:700;')}>إنشاء من كائن JSON</div>
+                <button onClick={v.loadJsonSample} style={css('background:var(--app-surface-2);color:var(--app-accent);border:1px solid var(--app-border);border-radius:9px;padding:7px 13px;font:600 12.5px var(--font-brand);cursor:pointer;')}>إدراج مثال</button>
+              </div>
+              <div style={css('font-size:13px;color:var(--app-muted);margin-bottom:16px;line-height:1.6;')}>ألصق كائن المشروع بالكامل — تفاصيله وأهدافه ومنهجه — ثم أنشئه دفعة واحدة. الحقل الوحيد المطلوب هو <span className="num" style={css('font-weight:700;color:var(--app-text);')}>name</span>.</div>
+              <textarea value={v.obJson} onChange={v.setObJson} dir="ltr" spellCheck="false" placeholder={'{\n  "name": "مسار Full-Stack",\n  "hourGoal": 216,\n  "goals": [ { "title": "...", "tasks": [...] } ],\n  "stages": [ { "title": "...", "weeks": [...] } ]\n}'} style={css('width:100%;min-height:300px;resize:vertical;background:var(--app-surface-2);border:1px solid var(--app-border);border-radius:12px;padding:14px;font:13px/1.6 ui-monospace,SFMono-Regular,Menlo,monospace;color:var(--app-text);outline:none;text-align:left;')} />
+              {v.obHasJson && <div style={css(v.jsonMsgStyle)}>{v.obJsonError}</div>}
+              <div style={css('display:flex;align-items:center;gap:12px;margin-top:18px;')}>
+                <div style={css('font-size:12px;color:var(--app-faint);flex:1;')}>المفاتيح المدعومة: name، subtitle، hourGoal، dailyTarget، goals[]، stages[].</div>
+                <button onClick={v.createFromJson} style={css('background:var(--app-accent);color:var(--app-accent-on);border:none;border-radius:12px;padding:13px 26px;font:700 14px var(--font-brand);cursor:pointer;')}>إنشاء المسار</button>
+              </div>
+            </div>
+            )}
           </div>
         </div>
         )}
