@@ -28,6 +28,9 @@ body {
 .num { font-family: var(--font-numeric); font-feature-settings: "tnum"; letter-spacing: 0; }
 input, textarea, select, button { font-family: inherit; }
 input::placeholder, textarea::placeholder { color: var(--app-faint); }
+[contenteditable][data-ph]:empty:before { content: attr(data-ph); color: var(--app-faint); pointer-events: none; }
+[contenteditable] ul { margin: 8px 0; padding-right: 22px; }
+[contenteditable]:focus { outline: none; }
 
 /* Range sliders */
 input[type=range] { -webkit-appearance: none; appearance: none; background: transparent; }

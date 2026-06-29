@@ -35,6 +35,9 @@ const uid = () => Math.random().toString(36).slice(2, 9)
 export default class LearningTracker extends React.Component {
   constructor(props) {
     super(props)
+    this._noteRef = React.createRef()
+    this._noteSyncId = null
+    this._noteSyncNode = null
     this.state = this.buildInitial()
   }
 
@@ -45,7 +48,7 @@ export default class LearningTracker extends React.Component {
   buildState(demo) {
     const base = {
       look: (this.state && this.state.look) || (this.props && this.props.look) || 'slate',
-      screen: 'today',
+      screen: 'today', activeNoteId: null, noteSort: 'updated',
       logDate: isoDate(Date.now()), logHours: 1.5, logLearnPct: 65, logNote: '',
       showGoalModal: false, ngTitle: '', ngDeadline: isoDate(Date.now()+14*DAY), ngBudget: 12, ngTaskRows: [{id:uid(),label:'',hours:''},{id:uid(),label:'',hours:''},{id:uid(),label:'',hours:''}],
       showProjectMenu: false, showProjectModal: false, showCreate: false, npName: '', npSubtitle: '', npHourGoal: 100, npDailyTarget: 2,
@@ -60,11 +63,11 @@ export default class LearningTracker extends React.Component {
   }
   blankOb() { return { step:0, mode:'form', name:'', subtitle:'', hourGoal:100, dailyTarget:2, color:'#00d97e', goals:[], stages:[], json:'', jsonError:'', jsonOk:false } }
   blankSettings(hourGoal, dailyTarget) { return { totalHourGoal: Math.max(1, hourGoal||100), dailyTarget: Math.max(0.5, dailyTarget||2), weeksTotal: 0, pomo: { focus:25, short:5, long:15 }, noise:'brown', volume:60 } }
-  emptyProjectShape() { return { id:'__none', name:'', subtitle:'', color:'#00d97e', goals:[], sessions:[], curriculum:[], settings: this.blankSettings(100,2), activeGoalId:null } }
+  emptyProjectShape() { return { id:'__none', name:'', subtitle:'', color:'#00d97e', notesList:[], goals:[], sessions:[], curriculum:[], settings: this.blankSettings(100,2), activeGoalId:null } }
   seedProject() {
     const d = this.seedData()
     const first = d.goals.find(g => g.status === 'active') || d.goals[0] || null
-    return { id: 'p_fs', name: 'مسار Full-Stack', subtitle: 'من واجهات إلى Full-Stack', color:'#00d97e', goals: d.goals, sessions: d.sessions, curriculum: d.curriculum, settings: d.settings, activeGoalId: first ? first.id : null }
+    return { id: 'p_fs', name: 'مسار Full-Stack', subtitle: 'من واجهات إلى Full-Stack', color:'#00d97e', notesList:[], goals: d.goals, sessions: d.sessions, curriculum: d.curriculum, settings: d.settings, activeGoalId: first ? first.id : null }
   }
   clearAll() { this.stopNoise(); if (confirm('مسح كل الأهداف والجلسات والبدء من جديد؟')) this.setState(this.buildState(false), () => this.persist()) }
   loadDemo() { this.stopNoise(); this.setState(this.buildState(true), () => this.persist()) }
@@ -133,6 +136,10 @@ export default class LearningTracker extends React.Component {
       if (saved) {
         const d = JSON.parse(saved)
         if (d.projects && d.projects.length) {
+          d.projects.forEach(pr => {
+            if (!Array.isArray(pr.notesList)) { pr.notesList = (pr.notes && pr.notes.trim()) ? [{ id:uid(), title:'ملاحظة', body:pr.notes, createdAt:Date.now(), updatedAt:Date.now() }] : [] }
+            delete pr.notes
+          })
           const apid = (d.activeProjectId && d.projects.some(p=>p.id===d.activeProjectId)) ? d.activeProjectId : d.projects[0].id
           const ap = d.projects.find(p=>p.id===apid)
           const ag = ap.goals.find(g=>g.status==='active') || ap.goals[0] || null
@@ -199,6 +206,38 @@ export default class LearningTracker extends React.Component {
   }
 
   go(s) { return () => this.setState({ screen: s }) }
+
+  // ---------- notes ----------
+  addNote() {
+    const n = { id:uid(), title:'', body:'', createdAt:Date.now(), updatedAt:Date.now() }
+    this.commit(s => ({ projects: s.projects.map(p => p.id!==s.activeProjectId ? p : { ...p, notesList:[n, ...(p.notesList||[])] }), screen:'notes', activeNoteId:n.id }))
+  }
+  selectNote(id) { this.setState({ activeNoteId: id }) }
+  setNoteSort(k) { this.setState({ noteSort: k }) }
+  updateNote(id, field, val) { this.commitProject(p => ({ ...p, notesList:(p.notesList||[]).map(x => x.id!==id ? x : { ...x, [field]:val, updatedAt:Date.now() }) })) }
+  saveNoteBody(html) { const id = this.state.activeNoteId; if (id) this.updateNote(id, 'body', html) }
+  exec(cmd) { return (e) => { if (e && e.preventDefault) e.preventDefault(); try { document.execCommand(cmd, false, null) } catch(_){} const node = this._noteRef.current; if (node) this.saveNoteBody(node.innerHTML) } }
+  noteTodoMap(fn) { const id = this.state.activeNoteId; this.commitProject(p => ({ ...p, notesList:(p.notesList||[]).map(n => n.id!==id ? n : { ...n, todos: fn(n.todos||[]), updatedAt:Date.now() }) })) }
+  addTodo() { this.noteTodoMap(t => [...t, { id:uid(), text:'', done:false }]) }
+  toggleTodo(tid) { this.noteTodoMap(t => t.map(x => x.id!==tid ? x : { ...x, done:!x.done })) }
+  setTodoText(tid, val) { this.noteTodoMap(t => t.map(x => x.id!==tid ? x : { ...x, text:val })) }
+  removeTodo(tid) { this.noteTodoMap(t => t.filter(x => x.id!==tid)) }
+  componentDidUpdate() {
+    const node = this._noteRef.current
+    if (!node) { this._noteSyncNode = null; this._noteSyncId = null; return }
+    const p = this.ap(); if (!p) return
+    const an = (p.notesList||[]).find(n => n.id === this.state.activeNoteId)
+    if (!an) return
+    if (node !== this._noteSyncNode || this._noteSyncId !== an.id) {
+      const b = an.body || ''
+      node.innerHTML = /[<]/.test(b) ? b : b.replace(/\n/g, '<br>')
+      this._noteSyncNode = node; this._noteSyncId = an.id
+    }
+  }
+  deleteNote(id) {
+    if (!confirm('حذف هذه الملاحظة؟')) return
+    this.commit(s => ({ projects: s.projects.map(p => { if (p.id!==s.activeProjectId) return p; const list=(p.notesList||[]).filter(x=>x.id!==id); return { ...p, notesList:list } }), activeNoteId: (s.activeNoteId===id ? null : s.activeNoteId) }))
+  }
 
   // ---------- derived helpers ----------
   hoursForGoal(id) { return this.ap().sessions.filter(x => x.goalId === id).reduce((a,b) => a + b.hours, 0) }
@@ -270,7 +309,7 @@ export default class LearningTracker extends React.Component {
       return { id:uid(), title:g.title.trim(), hourBudget:budget, status: g.status==='done'?'done':'active', createdAt:Date.now(), deadline, subTasks:tasks }
     })
     const curriculum = (ob.stages||[]).filter(s=>(s.title||'').trim()||(s.weeks||[]).some(w=>(w.topic||'').trim()||(w.build||'').trim())).map(s=>({ id:uid(), title:(s.title||'').trim()||'مرحلة', weeks:(s.weeks||[]).filter(w=>(w.topic||'').trim()||(w.build||'').trim()).map(w=>({id:uid(),topic:(w.topic||'').trim(),build:(w.build||'').trim(),done:!!w.done})) }))
-    return { id:uid(), name:ob.name.trim(), subtitle:(ob.subtitle||'').trim()||'مسار تعلّم جديد', color: ob.color || '#00d97e', goals, sessions:[], curriculum, settings:this.blankSettings(+ob.hourGoal||100, +ob.dailyTarget||2), activeGoalId: goals[0]?goals[0].id:null }
+    return { id:uid(), name:ob.name.trim(), subtitle:(ob.subtitle||'').trim()||'مسار تعلّم جديد', color: ob.color || '#00d97e', notesList:[], goals, sessions:[], curriculum, settings:this.blankSettings(+ob.hourGoal||100, +ob.dailyTarget||2), activeGoalId: goals[0]?goals[0].id:null }
   }
   commitFirstProject(proj) {
     this.commit(s => ({ projects:[...s.projects, proj], activeProjectId:proj.id, screen:'today', showCreate:false, logGoalId: proj.goals[0]?proj.goals[0].id:'', timer:{...s.timer, mode:'focus', running:false, secsLeft:proj.settings.pomo.focus*60, goalId: proj.goals[0]?proj.goals[0].id:null}, ob:this.blankOb() }))
@@ -442,6 +481,44 @@ export default class LearningTracker extends React.Component {
     const navBase = 'display:flex;align-items:center;gap:13px;width:100%;padding:11px 14px;border:none;border-radius:12px;cursor:pointer;font-family:var(--font-brand);font-size:15.5px;font-weight:600;text-align:right;background:transparent;color:var(--app-muted);'
     const navActive = 'display:flex;align-items:center;gap:13px;width:100%;padding:11px 14px;border:none;border-radius:12px;cursor:pointer;font-family:var(--font-brand);font-size:15.5px;font-weight:700;text-align:right;background:var(--app-surface-2);color:var(--app-text);'
     const nav = k => (screen === k ? navActive : navBase)
+
+    // notes
+    const noteSort = st.noteSort || 'updated'
+    const noteSorter = noteSort==='created' ? (a,b)=>b.createdAt-a.createdAt
+      : noteSort==='title' ? (a,b)=>((a.title||'').trim()||'ببب').localeCompare((b.title||'').trim()||'ببب','ar')
+      : (a,b)=>b.updatedAt-a.updatedAt
+    const noteList = [...(p.notesList||[])].sort(noteSorter)
+    const activeNote = noteList.find(n => n.id === st.activeNoteId) || null
+    const noteFmt = (ts) => { const d=new Date(ts); return d.getDate()+' '+AR_MONTHS[d.getMonth()]+' · '+String(d.getHours()).padStart(2,'0')+':'+String(d.getMinutes()).padStart(2,'0') }
+    const noteUpdated = activeNote ? noteFmt(activeNote.updatedAt) : ''
+    const stripHtml = (s) => (s||'').replace(/<[^>]+>/g,' ').replace(/&nbsp;/g,' ').replace(/&amp;/g,'&').replace(/\s+/g,' ').trim()
+    const notesItems = noteList.map(n => {
+      const isAct = activeNote && n.id === activeNote.id
+      const body = stripHtml(n.body)
+      const td = n.todos||[]; const tdDone = td.filter(x=>x.done).length
+      return {
+        id: n.id,
+        title: (n.title||'').trim() || 'بدون عنوان',
+        snippet: body ? (body.length>72 ? body.slice(0,72)+'…' : body) : 'لا محتوى بعد',
+        date: noteFmt(n.updatedAt),
+        hasTodos: td.length>0, todoLabel: tdDone+'/'+td.length,
+        select: () => this.selectNote(n.id),
+        cardStyle: 'text-align:right;width:100%;background:'+(isAct?'var(--app-surface-2)':'var(--app-surface)')+';border:1px solid '+(isAct?'var(--app-accent)':'var(--app-border)')+';border-radius:14px;padding:14px 16px;cursor:pointer;display:flex;flex-direction:column;gap:5px;font-family:var(--font-brand);color:var(--app-text);',
+        titleStyle: 'font-size:14.5px;font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;color:'+((n.title||'').trim()?'var(--app-text)':'var(--app-faint)')+';',
+      }
+    })
+    const noteSortOptions = [['updated','الأحدث'],['created','الإنشاء'],['title','العنوان']].map(([k,lab]) => ({
+      key: k, label: lab, select: () => this.setNoteSort(k),
+      style: 'border:none;cursor:pointer;font:600 12px var(--font-brand);padding:6px 11px;border-radius:8px;'+(noteSort===k?'background:var(--app-accent);color:var(--app-accent-on);':'background:transparent;color:var(--app-faint);'),
+    }))
+    const aTodos = activeNote ? (activeNote.todos||[]) : []
+    const noteTodos = aTodos.map(t => ({
+      id: t.id, text: t.text, done: t.done,
+      toggle: () => this.toggleTodo(t.id), setText: e => this.setTodoText(t.id, e.target.value), remove: () => this.removeTodo(t.id),
+      boxStyle: 'width:20px;height:20px;flex-shrink:0;border-radius:6px;cursor:pointer;display:flex;align-items:center;justify-content:center;border:2px solid '+(t.done?'var(--app-accent)':'var(--app-border)')+';background:'+(t.done?'var(--app-accent)':'transparent')+';',
+      textStyle: 'flex:1;min-width:0;background:transparent;border:none;outline:none;font:14px var(--font-brand);color:'+(t.done?'var(--app-faint)':'var(--app-text)')+';'+(t.done?'text-decoration:line-through;':''),
+    }))
+    const todoDone = aTodos.filter(t=>t.done).length
 
     const sessions = p.sessions
     const totalHoursN = sessions.reduce((a,b)=>a+b.hours,0)
@@ -635,9 +712,19 @@ export default class LearningTracker extends React.Component {
         { id:'forest', label:'غابة · أخضر' },
         { id:'slate', label:'إردوازي · أزرق' },
       ],
-      isToday:screen==='today', isGoals:screen==='goals', isFocus:screen==='focus', isLog:screen==='log', isCurr:screen==='curr', isStats:screen==='stats',
-      goToday:this.go('today'), goGoals:this.go('goals'), goFocus:this.go('focus'), goLog:this.go('log'), goCurr:this.go('curr'), goStats:this.go('stats'),
-      navToday:nav('today'), navGoals:nav('goals'), navFocus:nav('focus'), navLog:nav('log'), navCurr:nav('curr'), navStats:nav('stats'),
+      isToday:screen==='today', isGoals:screen==='goals', isFocus:screen==='focus', isLog:screen==='log', isCurr:screen==='curr', isStats:screen==='stats', isNotes:screen==='notes',
+      goToday:this.go('today'), goGoals:this.go('goals'), goFocus:this.go('focus'), goLog:this.go('log'), goCurr:this.go('curr'), goStats:this.go('stats'), goNotes:this.go('notes'),
+      navToday:nav('today'), navGoals:nav('goals'), navFocus:nav('focus'), navLog:nav('log'), navCurr:nav('curr'), navStats:nav('stats'), navNotes:nav('notes'),
+
+      // notes
+      notesItems, notesCount: noteList.length, hasNotes: noteList.length>0, noNotes: noteList.length===0, noteSortOptions,
+      activeNote: !!activeNote, noActiveNote: noteList.length>0 && !activeNote, noteTitle: activeNote? (activeNote.title||'') : '', noteSavedLabel: activeNote? ('آخر حفظ · '+noteUpdated) : '',
+      noteRef: this._noteRef, noteBodyInput: e => this.saveNoteBody(e.target.innerHTML),
+      execBold: this.exec('bold'), execItalic: this.exec('italic'), execUnderline: this.exec('underline'), execUL: this.exec('insertUnorderedList'), execStrike: this.exec('strikeThrough'),
+      noteTodos, todoCount: aTodos.length, todoDone, hasTodos: aTodos.length>0, noTodos: aTodos.length===0, addTodo: () => this.addTodo(),
+      setNoteTitle: e => activeNote && this.updateNote(activeNote.id,'title',e.target.value),
+      deleteActiveNote: () => activeNote && this.deleteNote(activeNote.id),
+      addNote: () => this.addNote(),
 
       // theming
       themeVars,
@@ -982,6 +1069,10 @@ export default class LearningTracker extends React.Component {
           <button onClick={v.goStats} style={css(v.navStats)}>
             <svg width="21" height="21" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round"><path d="M5 20V13"></path><path d="M10 20V8"></path><path d="M15 20V15"></path><path d="M20 20V5"></path></svg>
             <span>الإحصائيات</span>
+          </button>
+          <button onClick={v.goNotes} style={css(v.navNotes)}>
+            <svg width="21" height="21" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round"><path d="M5 4h11l3 3v13H5z"></path><path d="M9 9h6"></path><path d="M9 13h6"></path><path d="M9 17h3"></path></svg>
+            <span>ملاحظات</span>
           </button>
 
           <div style={css('margin-top:auto;display:flex;flex-direction:column;gap:10px;')}>
@@ -1420,6 +1511,106 @@ export default class LearningTracker extends React.Component {
               </div>
               <div style={css('font-size:12px;color:var(--app-faint);margin-top:14px;')}>المربعات الفارغة أيام راحة — لا بأس، الاستمرارية أهم من الكمال.</div>
             </div>
+          </section>
+          )}
+
+          {/* SCREEN: NOTES */}
+          {v.isNotes && (
+          <section style={css('padding:26px 34px 34px;display:flex;flex-direction:column;gap:16px;min-height:calc(100vh - 73px);')}>
+            <div style={css('display:flex;align-items:center;justify-content:space-between;gap:16px;')}>
+              <div>
+                <div style={css('font-size:26px;font-weight:700;')}>ملاحظات المسار</div>
+                <div style={css('color:var(--app-muted);font-size:14px;margin-top:5px;')}>دوّن أفكارك ومواردك وما تعلّمته أثناء العمل — تُحفظ تلقائيًا مع هذا المسار.</div>
+              </div>
+              <button onClick={v.addNote} style={css('flex-shrink:0;display:flex;align-items:center;gap:8px;background:var(--app-accent);color:var(--app-accent-on);border:none;border-radius:12px;padding:13px 20px;font:700 14px var(--font-brand);cursor:pointer;')}>
+                <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.6" strokeLinecap="round"><path d="M12 5v14"></path><path d="M5 12h14"></path></svg>
+                ملاحظة جديدة
+              </button>
+            </div>
+
+            {v.hasNotes && (
+            <div style={css('flex:1;min-height:560px;display:flex;gap:20px;')}>
+              <div style={css('width:252px;flex-shrink:0;display:flex;flex-direction:column;gap:12px;min-height:0;')}>
+                <div style={css('display:flex;align-items:center;justify-content:space-between;gap:8px;')}>
+                  <span style={css('font-size:12.5px;color:var(--app-faint);')}>الكل · <span className="num">{v.notesCount}</span></span>
+                  <div style={css('display:flex;gap:2px;background:var(--app-surface-2);border-radius:9px;padding:3px;')}>
+                    {v.noteSortOptions.map(o => <button key={o.key} onClick={o.select} style={css(o.style)}>{o.label}</button>)}
+                  </div>
+                </div>
+                <div style={css('flex:1;min-height:0;overflow:auto;display:flex;flex-direction:column;gap:9px;padding-left:4px;')}>
+                  {v.notesItems.map(n => (
+                    <button key={n.id} onClick={n.select} style={css(n.cardStyle)}>
+                      <div style={css(n.titleStyle)}>{n.title}</div>
+                      <div style={css('font-size:12.5px;color:var(--app-muted);line-height:1.55;overflow:hidden;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;')}>{n.snippet}</div>
+                      <div style={css('display:flex;align-items:center;gap:10px;margin-top:2px;')}>
+                        <span className="num" style={css('font-size:11px;color:var(--app-faint);')}>{n.date}</span>
+                        {n.hasTodos && <span style={css('display:flex;align-items:center;gap:4px;font-size:11px;color:var(--app-faint);')}><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round"><path d="M4 12l5 5L20 6"></path></svg><span className="num">{n.todoLabel}</span></span>}
+                      </div>
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {v.activeNote && (
+              <div style={css('flex:1;min-width:0;display:flex;flex-direction:column;gap:16px;min-height:0;')}>
+                <div style={css('flex:1;min-height:0;background:var(--app-surface);border:1px solid var(--app-border);border-radius:18px;display:flex;flex-direction:column;overflow:hidden;')}>
+                  <input value={v.noteTitle} onChange={v.setNoteTitle} placeholder="عنوان الملاحظة" style={css('background:transparent;border:none;outline:none;padding:22px 26px 10px;font:700 23px var(--font-brand);color:var(--app-text);')} />
+                  <div style={css('display:flex;align-items:center;gap:3px;margin:0 22px 4px;padding:4px;background:var(--app-surface-2);border-radius:11px;align-self:flex-start;')}>
+                    <button onMouseDown={v.execBold} title="عريض" style={css('width:34px;height:34px;border:none;background:transparent;color:var(--app-text);border-radius:8px;cursor:pointer;font:800 16px Georgia,serif;')}>B</button>
+                    <button onMouseDown={v.execItalic} title="مائل" style={css('width:34px;height:34px;border:none;background:transparent;color:var(--app-text);border-radius:8px;cursor:pointer;font:italic 700 16px Georgia,serif;')}>I</button>
+                    <button onMouseDown={v.execUnderline} title="تسطير" style={css('width:34px;height:34px;border:none;background:transparent;color:var(--app-text);border-radius:8px;cursor:pointer;font:600 15px Georgia,serif;text-decoration:underline;')}>U</button>
+                    <button onMouseDown={v.execStrike} title="شطب" style={css('width:34px;height:34px;border:none;background:transparent;color:var(--app-text);border-radius:8px;cursor:pointer;font:600 15px Georgia,serif;text-decoration:line-through;')}>S</button>
+                    <div style={css('width:1px;height:20px;background:var(--app-border);margin:0 5px;')}></div>
+                    <button onMouseDown={v.execUL} title="قائمة نقطية" style={css('width:34px;height:34px;border:none;background:transparent;color:var(--app-text);border-radius:8px;cursor:pointer;display:flex;align-items:center;justify-content:center;')}><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><circle cx="5" cy="7" r="1.5" fill="currentColor"></circle><circle cx="5" cy="17" r="1.5" fill="currentColor"></circle><path d="M10 7h10"></path><path d="M10 17h10"></path></svg></button>
+                  </div>
+                  <div style={css('flex:1;overflow:auto;min-height:0;')}>
+                    <div contentEditable={true} suppressContentEditableWarning={true} ref={v.noteRef} onInput={v.noteBodyInput} data-ph="اكتب ملاحظتك هنا…" style={css('padding:12px 26px 24px;font:15.5px/2 var(--font-brand);color:var(--app-text);min-height:100%;')}></div>
+                  </div>
+                  <div style={css('display:flex;align-items:center;justify-content:space-between;gap:12px;padding:11px 22px;border-top:1px solid var(--app-border);')}>
+                    <div style={css('font-size:12px;color:var(--app-faint);display:flex;align-items:center;gap:7px;')}><span style={css('width:7px;height:7px;border-radius:50%;background:var(--app-accent);')}></span>{v.noteSavedLabel}</div>
+                    <button onClick={v.deleteActiveNote} style={css('display:flex;align-items:center;gap:6px;background:transparent;border:1px solid var(--app-border);color:var(--app-faint);border-radius:9px;padding:8px 14px;font:600 12.5px var(--font-brand);cursor:pointer;')}><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M4 7h16"></path><path d="M9 7V5h6v2"></path><path d="M7 7l1 13h8l1-13"></path></svg>حذف</button>
+                  </div>
+                </div>
+
+                <div style={css('flex-shrink:0;max-height:320px;background:var(--app-surface);border:1px solid var(--app-border);border-radius:18px;display:flex;flex-direction:column;overflow:hidden;')}>
+                  <div style={css('display:flex;align-items:center;justify-content:space-between;gap:12px;padding:16px 20px 12px;')}>
+                    <div style={css('display:flex;align-items:center;gap:10px;')}>
+                      <span style={css('font-size:15px;font-weight:700;')}>قائمة المهام</span>
+                      {v.hasTodos && <span className="num" style={css('font-size:12px;color:var(--app-faint);background:var(--app-surface-2);padding:3px 9px;border-radius:20px;')}>{v.todoDone}/{v.todoCount}</span>}
+                    </div>
+                    <button onClick={v.addTodo} style={css('display:flex;align-items:center;gap:6px;background:var(--app-accent-soft);border:none;color:var(--app-accent);font:700 12.5px var(--font-brand);cursor:pointer;padding:8px 13px;border-radius:9px;')}><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.6" strokeLinecap="round"><path d="M12 5v14"></path><path d="M5 12h14"></path></svg>إضافة مهمة</button>
+                  </div>
+                  {v.hasTodos && (
+                  <div style={css('flex:1;overflow:auto;min-height:0;padding:0 12px 12px;display:flex;flex-direction:column;gap:2px;')}>
+                    {v.noteTodos.map(t => (
+                      <div key={t.id} style={css('display:flex;align-items:center;gap:12px;padding:8px;border-radius:10px;')}>
+                        <div onClick={t.toggle} style={css(t.boxStyle)}>{t.done && <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="var(--app-accent-on)" strokeWidth="3.4" strokeLinecap="round" strokeLinejoin="round"><path d="M4 12l5 5L20 6"></path></svg>}</div>
+                        <input value={t.text} onChange={t.setText} placeholder="اكتب المهمة…" style={css(t.textStyle)} />
+                        <button onClick={t.remove} style={css('width:28px;height:28px;flex-shrink:0;border:none;background:transparent;color:var(--app-faint);border-radius:7px;cursor:pointer;font-size:13px;')}>✕</button>
+                      </div>
+                    ))}
+                  </div>
+                  )}
+                  {v.noTodos && <div style={css('padding:4px 20px 18px;font-size:13px;color:var(--app-faint);')}>لا مهام بعد — أضف أوّل مهمة لتتبّع خطواتك.</div>}
+                </div>
+              </div>
+              )}
+              {v.noActiveNote && (
+              <div style={css('flex:1;min-width:0;background:var(--app-surface);border:1px dashed var(--app-border);border-radius:18px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:8px;color:var(--app-faint);')}>
+                <svg width="34" height="34" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><path d="M5 4h11l3 3v13H5z"></path><path d="M9 9h6"></path><path d="M9 13h6"></path></svg>
+                <div style={css('font-size:14px;')}>اختر ملاحظة من القائمة لتحريرها.</div>
+              </div>
+              )}
+            </div>
+            )}
+
+            {v.noNotes && (
+            <div style={css('flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:16px;border:1px dashed var(--app-border);border-radius:18px;color:var(--app-faint);')}>
+              <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><path d="M5 4h11l3 3v13H5z"></path><path d="M9 9h6"></path><path d="M9 13h6"></path><path d="M9 17h3"></path></svg>
+              <div style={css('font-size:15px;')}>لا ملاحظات بعد لهذا المسار.</div>
+              <button onClick={v.addNote} style={css('display:flex;align-items:center;gap:8px;background:var(--app-accent);color:var(--app-accent-on);border:none;border-radius:12px;padding:12px 22px;font:700 14px var(--font-brand);cursor:pointer;')}>أنشئ أول ملاحظة</button>
+            </div>
+            )}
           </section>
           )}
 
