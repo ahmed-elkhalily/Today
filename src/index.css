@@ -1,0 +1,66 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* ===== Fonts ===== */
+/* Noor — Tarmeez Capital's brand Arabic typeface (3 weights). */
+@font-face { font-family: 'Noor'; font-style: normal; font-weight: 300; font-display: swap; src: url('/fonts/Noor-300.ttf') format('truetype'); }
+@font-face { font-family: 'Noor'; font-style: normal; font-weight: 400; font-display: swap; src: url('/fonts/Noor-400.ttf') format('truetype'); }
+@font-face { font-family: 'Noor'; font-style: normal; font-weight: 700; font-display: swap; src: url('/fonts/Noor-700.ttf') format('truetype'); }
+
+:root {
+  /* Noor for brand text; Cairo only for Latin/Arabic numerals, matching the design. */
+  --font-brand: 'Noor', 'Tajawal', 'Cairo', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  --font-numeric: 'Cairo', 'Noor', ui-sans-serif, sans-serif;
+}
+
+/* editable curriculum month-title: show a subtle underline on focus */
+.ed-line:focus { border-bottom: 1px solid var(--app-border) !important; }
+
+/* ===== Base ===== */
+* { box-sizing: border-box; }
+html, body { margin: 0; padding: 0; background: #000; }
+body {
+  font-family: var(--font-brand);
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+.num { font-family: var(--font-numeric); font-feature-settings: "tnum"; letter-spacing: 0; }
+input, textarea, select, button { font-family: inherit; }
+input::placeholder, textarea::placeholder { color: var(--app-faint); }
+
+/* Range sliders */
+input[type=range] { -webkit-appearance: none; appearance: none; background: transparent; }
+input[type=range]::-webkit-slider-runnable-track { height: 6px; border-radius: 4px; background: var(--app-surface-2); }
+input[type=range]::-webkit-slider-thumb { -webkit-appearance: none; appearance: none; width: 16px; height: 16px; border-radius: 50%; background: var(--app-text); margin-top: -5px; cursor: pointer; }
+input[type=range]::-moz-range-track { height: 6px; border-radius: 4px; background: var(--app-surface-2); }
+input[type=range]::-moz-range-thumb { width: 16px; height: 16px; border: none; border-radius: 50%; background: var(--app-text); cursor: pointer; }
+
+/* Scrollbars */
+::-webkit-scrollbar { width: 10px; height: 10px; }
+::-webkit-scrollbar-thumb { background: var(--app-border); border-radius: 8px; }
+::-webkit-scrollbar-track { background: transparent; }
+
+/* ===== Theme tokens ===== */
+:root, [data-look="onyx"] {
+  --app-canvas:#000000; --app-surface:#111111; --app-surface-2:#1c1c1c; --app-elev:#242424;
+  --app-border:#272727; --app-text:#ffffff; --app-muted:rgba(229,229,229,0.60); --app-faint:#8c8c8c;
+  --app-accent:#00d97e; --app-accent-on:#06231a; --app-accent-soft:rgba(0,217,126,0.12);
+  --focus-canvas:#000000; --focus-glow:rgba(0,217,126,0.10);
+  --st-on:#00d97e; --st-on-bg:rgba(0,217,126,0.14);
+  --st-behind:#e8a13c; --st-behind-bg:rgba(232,161,60,0.16);
+  --st-risk:#e5564e; --st-risk-bg:rgba(229,86,78,0.16);
+  --st-info:#4a93d9; --st-done:#8c8c8c;
+}
+[data-look="forest"] {
+  --app-canvas:#06120d; --app-surface:#0e2019; --app-surface-2:#163026; --app-elev:#1d3b30;
+  --app-border:#1c3a30; --app-text:#eafff5; --app-muted:rgba(206,235,221,0.62); --app-faint:#6f9384;
+  --app-accent:#00d97e; --app-accent-on:#06231a; --app-accent-soft:rgba(0,217,126,0.15);
+  --focus-canvas:#040d09; --focus-glow:rgba(0,217,126,0.12);
+}
+[data-look="slate"] {
+  --app-canvas:#0a0d13; --app-surface:#141922; --app-surface-2:#1d2533; --app-elev:#26303f;
+  --app-border:#232c3b; --app-text:#eef2f8; --app-muted:rgba(202,212,228,0.62); --app-faint:#7a8499;
+  --app-accent:#00d97e; --app-accent-on:#06231a; --app-accent-soft:rgba(0,217,126,0.13);
+  --focus-canvas:#070a0f; --focus-glow:rgba(0,217,126,0.08);
+}
