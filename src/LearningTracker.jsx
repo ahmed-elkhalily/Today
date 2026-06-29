@@ -24,6 +24,7 @@ export default class LearningTracker extends React.Component {
   }
   buildState(demo) {
     const base = {
+      look: (this.state && this.state.look) || (this.props && this.props.look) || 'slate',
       screen: 'today',
       logDate: isoDate(Date.now()), logHours: 1.5, logLearnPct: 65, logNote: '',
       showGoalModal: false, ngTitle: '', ngDeadline: isoDate(Date.now()+14*DAY), ngBudget: 12, ngTaskRows: [{id:uid(),label:'',hours:''},{id:uid(),label:'',hours:''},{id:uid(),label:'',hours:''}],
@@ -115,7 +116,7 @@ export default class LearningTracker extends React.Component {
           const apid = (d.activeProjectId && d.projects.some(p=>p.id===d.activeProjectId)) ? d.activeProjectId : d.projects[0].id
           const ap = d.projects.find(p=>p.id===apid)
           const ag = ap.goals.find(g=>g.status==='active') || ap.goals[0] || null
-          this.setState(s => ({ projects: d.projects, activeProjectId: apid, logGoalId: ag?ag.id:'', timer: { ...s.timer, goalId: ag?ag.id:null, secsLeft: ap.settings.pomo.focus*60, noise: ap.settings.noise, volume: ap.settings.volume } }))
+          this.setState(s => ({ projects: d.projects, activeProjectId: apid, look: d.look || s.look, logGoalId: ag?ag.id:'', timer: { ...s.timer, goalId: ag?ag.id:null, secsLeft: ap.settings.pomo.focus*60, noise: ap.settings.noise, volume: ap.settings.volume } }))
         }
       } else {
         const old = localStorage.getItem('lt_state_v6')
@@ -135,8 +136,8 @@ export default class LearningTracker extends React.Component {
 
   persist() {
     try {
-      const { projects, activeProjectId } = this.state
-      localStorage.setItem(KEY, JSON.stringify({ projects, activeProjectId }))
+      const { projects, activeProjectId, look } = this.state
+      localStorage.setItem(KEY, JSON.stringify({ projects, activeProjectId, look }))
     } catch (e) {}
   }
   commit(updater) { this.setState(updater, () => this.persist()) }
@@ -402,13 +403,14 @@ export default class LearningTracker extends React.Component {
   setNoise(n) { this.commit(s => ({ projects: s.projects.map(p => p.id !== s.activeProjectId ? p : { ...p, settings: { ...p.settings, noise: n } }), timer: { ...s.timer, noise: n } })); setTimeout(() => { if (this.state.timer.running && this.state.timer.mode==='focus') this.startNoise() }, 0) }
   setVolume(v) { this.setState(s => ({ projects: s.projects.map(p => p.id !== s.activeProjectId ? p : { ...p, settings: { ...p.settings, volume: v } }), timer: { ...s.timer, volume: v } }), () => { if (this._noiseGain) this._noiseGain.gain.value = (v/100)*0.5; this.persist() }) }
   setFocusGoal(id) { this.commit(s => ({ timer: { ...s.timer, goalId: id }, projects: s.projects.map(p => p.id !== s.activeProjectId ? p : { ...p, activeGoalId: id }) })) }
+  setLook(v) { this.commit(() => ({ look: v })) }
 
   renderVals() {
     const st = this.state
     const p = this.ap() || this.emptyProjectShape()
     const noProjects = st.projects.length === 0
     const set = p.settings
-    const look = this.props.look ?? 'slate'
+    const look = st.look || this.props.look || 'slate'
     const screen = st.screen
     const navBase = 'display:flex;align-items:center;gap:13px;width:100%;padding:11px 14px;border:none;border-radius:12px;cursor:pointer;font-family:var(--font-brand);font-size:15.5px;font-weight:600;text-align:right;background:transparent;color:var(--app-muted);'
     const navActive = 'display:flex;align-items:center;gap:13px;width:100%;padding:11px 14px;border:none;border-radius:12px;cursor:pointer;font-family:var(--font-brand);font-size:15.5px;font-weight:700;text-align:right;background:var(--app-surface-2);color:var(--app-text);'
@@ -600,6 +602,12 @@ export default class LearningTracker extends React.Component {
 
     return {
       look,
+      setLook: e => this.setLook(e.target.value),
+      lookOptions: [
+        { id:'onyx', label:'أونيكس · أسود' },
+        { id:'forest', label:'غابة · أخضر' },
+        { id:'slate', label:'إردوازي · أزرق' },
+      ],
       isToday:screen==='today', isGoals:screen==='goals', isFocus:screen==='focus', isLog:screen==='log', isCurr:screen==='curr', isStats:screen==='stats',
       goToday:this.go('today'), goGoals:this.go('goals'), goFocus:this.go('focus'), goLog:this.go('log'), goCurr:this.go('curr'), goStats:this.go('stats'),
       navToday:nav('today'), navGoals:nav('goals'), navFocus:nav('focus'), navLog:nav('log'), navCurr:nav('curr'), navStats:nav('stats'),
@@ -927,6 +935,13 @@ export default class LearningTracker extends React.Component {
                 <div style={css('font-size:20px;font-weight:700;line-height:1;')}><span className="num">{v.streak}</span> {v.streakUnit}</div>
                 <div style={css('font-size:12px;color:var(--app-faint);margin-top:3px;')}>سلسلة متتالية</div>
               </div>
+            </div>
+            <div style={css('position:relative;')}>
+              <div style={css('font-size:11px;color:var(--app-faint);margin-bottom:6px;padding-right:2px;')}>مظهر الألوان</div>
+              <select value={v.look} onChange={v.setLook} style={css('width:100%;appearance:none;background:var(--app-surface);border:1px solid var(--app-border);border-radius:11px;padding:10px 36px 10px 12px;color:var(--app-text);font:600 13px var(--font-brand);cursor:pointer;')}>
+                {v.lookOptions.map(o => <option key={o.id} value={o.id}>{o.label}</option>)}
+              </select>
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="var(--app-faint)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ position:'absolute', left:'13px', bottom:'13px', pointerEvents:'none' }}><path d="m6 9 6 6 6-6"></path></svg>
             </div>
             <div style={css('display:flex;gap:8px;')}>
               <button onClick={v.loadDemo} style={css('flex:1;background:transparent;border:1px solid var(--app-border);border-radius:10px;padding:9px;color:var(--app-muted);font:600 12px var(--font-brand);cursor:pointer;')}>بيانات تجريبية</button>
