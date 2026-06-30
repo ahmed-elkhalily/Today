@@ -32,6 +32,12 @@ const fmt1 = n => (Math.round(n * 10) / 10).toString()
 const dayStart = ms => { const d = new Date(ms); d.setHours(0,0,0,0); return d.getTime() }
 const isoDate = ms => { const d = new Date(ms); return d.getFullYear() + '-' + String(d.getMonth()+1).padStart(2,'0') + '-' + String(d.getDate()).padStart(2,'0') }
 const uid = () => Math.random().toString(36).slice(2, 9)
+// Ambient types backed by a real recorded loop at public/sounds/<id>.mp3.
+// Drop a new <id>.mp3 in that folder + add its id here to use it. white/pink/
+// brown stay synthesized (pure noise needs no file). On load error the engine
+// falls back to the procedural synth for that id automatically.
+const SOUND_BASE = '/sounds/'
+const FILE_SOUNDS = new Set(['rain', 'ocean', 'wind', 'fire', 'train', 'cafe', 'forest', 'stream'])
 
 export default class LearningTracker extends React.Component {
   constructor(props) {
@@ -474,16 +480,32 @@ export default class LearningTracker extends React.Component {
     return buf
   }
   startNoise() {
+    const t = this.state.timer
+    if (t.noise === 'none') { this.stopNoise(); return }
+    if (FILE_SOUNDS.has(t.noise)) { this.startFileNoise(t.noise, t.volume); return }
+    this.startSynth(t.noise, t.volume)
+  }
+  // Real recorded loop (mp3 in public/sounds). Falls back to synth on load error.
+  startFileNoise(id, volume) {
+    this.stopNoise()
     try {
-      const t = this.state.timer
+      const el = new Audio(SOUND_BASE + id + '.mp3')
+      el.loop = true; el.volume = Math.min(1, (volume || 0) / 100)
+      el.addEventListener('error', () => { if (this._audioEl === el) { this._audioEl = null; this.startSynth(id, this.state.timer.volume) } })
+      this._audioEl = el
+      const pr = el.play(); if (pr && pr.catch) pr.catch(() => {})
+    } catch (e) { this.startSynth(id, volume) }
+  }
+  startSynth(type, volume) {
+    try {
       const ctx = this.ensureCtx()
       this.stopNoise()
       this._nodes = []; this._evt = []
-      const master = ctx.createGain(); master.gain.value = (t.volume/100) * 0.5
+      const master = ctx.createGain(); master.gain.value = (volume/100) * 0.5
       master.connect(ctx.destination)
       this._noiseGain = master; this._nodes.push(master)
       this._popBuf = this.makeBuffer(ctx, 'white', 0.4)
-      this.buildAmbient(ctx, master, t.noise)
+      this.buildAmbient(ctx, master, type)
     } catch (e) {}
   }
   buildAmbient(ctx, out, type) {
@@ -593,13 +615,14 @@ export default class LearningTracker extends React.Component {
     } catch (e) {}
   }
   stopNoise() {
+    if (this._audioEl) { try { this._audioEl.pause(); this._audioEl.removeAttribute('src'); this._audioEl.load() } catch (e) {} this._audioEl = null }
     try { (this._evt||[]).forEach(id => clearTimeout(id)) } catch (e) {}
     this._evt = []
     try { (this._nodes||[]).forEach(n => { try { if (n.stop) n.stop() } catch (e) {} try { n.disconnect() } catch (e) {} }) } catch (e) {}
     this._nodes = []; this._noiseGain = null
   }
   setNoise(n) { this.commit(s => ({ projects: s.projects.map(p => p.id !== s.activeProjectId ? p : { ...p, settings: { ...p.settings, noise: n } }), timer: { ...s.timer, noise: n } })); setTimeout(() => { if (this.state.timer.running && this.state.timer.mode==='focus') this.startNoise() }, 0) }
-  setVolume(v) { this.setState(s => ({ projects: s.projects.map(p => p.id !== s.activeProjectId ? p : { ...p, settings: { ...p.settings, volume: v } }), timer: { ...s.timer, volume: v } }), () => { if (this._noiseGain) this._noiseGain.gain.value = (v/100)*0.5; this.persist() }) }
+  setVolume(v) { this.setState(s => ({ projects: s.projects.map(p => p.id !== s.activeProjectId ? p : { ...p, settings: { ...p.settings, volume: v } }), timer: { ...s.timer, volume: v } }), () => { if (this._noiseGain) this._noiseGain.gain.value = (v/100)*0.5; if (this._audioEl) this._audioEl.volume = Math.min(1, v/100); this.persist() }) }
   // ---------- clock tick ----------
   startTick() {
     this.stopTick()
