@@ -2,3 +2,9 @@ node_modules
 dist
 .DS_Store
 *.local
+
+# build verification scratch + alt package manager
+dist_check
+dist_verify
+vite.config.js.timestamp-*
+pnpm-lock.yaml
