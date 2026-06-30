@@ -37,7 +37,7 @@ const uid = () => Math.random().toString(36).slice(2, 9)
 // brown stay synthesized (pure noise needs no file). On load error the engine
 // falls back to the procedural synth for that id automatically.
 const SOUND_BASE = '/sounds/'
-const FILE_SOUNDS = new Set(['rain', 'ocean', 'wind', 'fire', 'train', 'cafe', 'forest', 'stream'])
+const FILE_SOUNDS = new Set(['rain', 'ocean', 'wind', 'train', 'cafe', 'forest', 'stream'])
 
 export default class LearningTracker extends React.Component {
   constructor(props) {
@@ -52,7 +52,7 @@ export default class LearningTracker extends React.Component {
   buildState(demo) {
     const base = {
       look: (this.state && this.state.look) || (this.props && this.props.look) || 'slate',
-      screen: 'today', activeNoteId: null, noteSort: 'updated',
+      activeNoteId: null, noteSort: 'updated',
       logDate: isoDate(Date.now()), logHours: 1.5, logLearnPct: 65, logNote: '',
       showGoalModal: false, ngTitle: '', ngDeadline: isoDate(Date.now()+14*DAY), ngBudget: 12, ngTaskRows: [{id:uid(),label:'',hours:''},{id:uid(),label:'',hours:''},{id:uid(),label:'',hours:''}],
       showProjectMenu: false, showProjectModal: false, showCreate: false, npName: '', npSubtitle: '', npHourGoal: 100, npDailyTarget: 2,
@@ -213,12 +213,13 @@ export default class LearningTracker extends React.Component {
     this.commit(st => ({ projects: [...st.projects, pr], activeProjectId: pr.id, showProjectModal: false, logGoalId: '', timer: { ...st.timer, mode:'focus', running:false, secsLeft: pr.settings.pomo.focus*60, goalId: null } }))
   }
 
-  go(s) { return () => this.setState({ screen: s }) }
+  go(s) { return () => this.props.go(s) }
 
   // ---------- notes ----------
   addNote() {
     const n = { id:uid(), title:'', body:'', createdAt:Date.now(), updatedAt:Date.now() }
-    this.commit(s => ({ projects: s.projects.map(p => p.id!==s.activeProjectId ? p : { ...p, notesList:[n, ...(p.notesList||[])] }), screen:'notes', activeNoteId:n.id }))
+    this.commit(s => ({ projects: s.projects.map(p => p.id!==s.activeProjectId ? p : { ...p, notesList:[n, ...(p.notesList||[])] }), activeNoteId:n.id }))
+    this.props.go('notes')
   }
   selectNote(id) { this.setState({ activeNoteId: id }) }
   setNoteSort(k) { this.setState({ noteSort: k }) }
@@ -307,7 +308,8 @@ export default class LearningTracker extends React.Component {
     return { id:uid(), name:ob.name.trim(), subtitle:(ob.subtitle||'').trim()||'مسار تعلّم جديد', color: ob.color || '#00d97e', notesList:[], goals, sessions:[], curriculum, settings:this.blankSettings(+ob.hourGoal||100, +ob.dailyTarget||2), activeGoalId: goals[0]?goals[0].id:null }
   }
   commitFirstProject(proj) {
-    this.commit(s => ({ projects:[...s.projects, proj], activeProjectId:proj.id, screen:'today', showCreate:false, logGoalId: proj.goals[0]?proj.goals[0].id:'', timer:{...s.timer, mode:'focus', running:false, secsLeft:proj.settings.pomo.focus*60, goalId: proj.goals[0]?proj.goals[0].id:null}, ob:this.blankOb() }))
+    this.commit(s => ({ projects:[...s.projects, proj], activeProjectId:proj.id, showCreate:false, logGoalId: proj.goals[0]?proj.goals[0].id:'', timer:{...s.timer, mode:'focus', running:false, secsLeft:proj.settings.pomo.focus*60, goalId: proj.goals[0]?proj.goals[0].id:null}, ob:this.blankOb() }))
+    this.props.go('today')
   }
   createFirstProject() {
     const ob = this.state.ob
@@ -660,7 +662,7 @@ export default class LearningTracker extends React.Component {
     const noProjects = st.projects.length === 0
     const set = p.settings
     const look = st.look || this.props.look || 'slate'
-    const screen = st.screen
+    const screen = this.props.screen || 'today'
     const themeHex = (noProjects || st.showCreate) ? (st.ob.color || '#00d97e') : (p.color || '#00d97e')
     const themeVars = themeVarsFor(themeHex)
     const aRGB = (c => c.r+','+c.g+','+c.b)(hexToRgb(themeHex))
