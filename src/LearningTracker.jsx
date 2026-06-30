@@ -427,6 +427,7 @@ export default class LearningTracker extends React.Component {
   completeBlock(skipped) {
     const t = this.state.timer
     this.stopNoise(); this.stopTick()
+    if (!skipped) this.playChime()
     if (t.mode === 'focus' && !skipped) {
       const dur = this.modeSecs('focus')
       const h = +(dur / 3600).toFixed(2)
@@ -440,6 +441,29 @@ export default class LearningTracker extends React.Component {
 
   // ---------- ambient sound ----------
   ensureCtx() { if (!this._actx) this._actx = new (window.AudioContext || window.webkitAudioContext)(); if (this._actx.state === 'suspended') this._actx.resume(); return this._actx }
+  // Bell-like 3-note arpeggio when a focus/break block completes naturally.
+  playChime() {
+    try {
+      const ctx = this.ensureCtx()
+      const now = ctx.currentTime
+      const vol = Math.max(0.3, this.state.timer.volume/100) * 0.55
+      const master = ctx.createGain(); master.gain.value = vol; master.connect(ctx.destination)
+      const notes = [880, 1108.73, 1318.51] // A5 · C#6 · E6 (major triad)
+      notes.forEach((f, i) => {
+        const t0 = now + i*0.14
+        for (const [mult, peak] of [[1, 0.6], [2.01, 0.16], [3, 0.08]]) {
+          const o = ctx.createOscillator(); o.type = 'sine'; o.frequency.value = f*mult
+          const g = ctx.createGain()
+          g.gain.setValueAtTime(0.0001, t0)
+          g.gain.linearRampToValueAtTime(peak, t0+0.008)
+          g.gain.exponentialRampToValueAtTime(0.0001, t0+1.3)
+          o.connect(g).connect(master); o.start(t0); o.stop(t0+1.4)
+          o.onended = () => { try { o.disconnect(); g.disconnect() } catch (e) {} }
+        }
+      })
+      setTimeout(() => { try { master.disconnect() } catch (e) {} }, 2000)
+    } catch (e) {}
+  }
   makeBuffer(ctx, type, secs) {
     const size = Math.floor(secs * ctx.sampleRate)
     const buf = ctx.createBuffer(1, size, ctx.sampleRate)
