@@ -55,9 +55,9 @@ export default class LearningTracker extends React.Component {
     if (demo) {
       const proj = this.seedProject()
       const first = proj.goals.find(g => g.status === 'active') || proj.goals[0] || null
-      return { ...base, projects: [proj], activeProjectId: proj.id, logGoalId: first ? first.id : '', timer: { mode:'focus', secsLeft: proj.settings.pomo.focus*60, running:false, endsAt:null, sessionNum:1, goalId: first ? first.id : null, noise: proj.settings.noise, volume: proj.settings.volume } }
+      return { ...base, projects: [proj], activeProjectId: proj.id, logGoalId: first ? first.id : '', timer: { mode:'focus', secsLeft: proj.settings.pomo.focus*60, running:false, endsAt:null, sessionNum:1, goalId: first ? first.id : null, noise: proj.settings.noise, volume: proj.settings.volume, tick: !!proj.settings.tick } }
     }
-    return { ...base, projects: [], activeProjectId: null, logGoalId: '', timer: { mode:'focus', secsLeft: 25*60, running:false, endsAt:null, sessionNum:1, goalId:null, noise:'brown', volume:60 } }
+    return { ...base, projects: [], activeProjectId: null, logGoalId: '', timer: { mode:'focus', secsLeft: 25*60, running:false, endsAt:null, sessionNum:1, goalId:null, noise:'brown', volume:60, tick:false } }
   }
   blankOb() { return { step:0, mode:'form', name:'', subtitle:'', hourGoal:100, dailyTarget:2, color:'#00d97e', goals:[], stages:[], json:'', jsonError:'', jsonOk:false } }
   blankSettings(hourGoal, dailyTarget) { return { totalHourGoal: Math.max(1, hourGoal||100), dailyTarget: Math.max(0.5, dailyTarget||2), weeksTotal: 0, pomo: { focus:25, short:5, long:15 }, noise:'brown', volume:60 } }
@@ -142,10 +142,10 @@ export default class LearningTracker extends React.Component {
           const ap = d.projects.find(p=>p.id===apid)
           const ag = ap.goals.find(g=>g.status==='active') || ap.goals[0] || null
           this.setState(s => {
-            let timer = d.timer ? { ...d.timer } : { ...s.timer, goalId: ag?ag.id:null, secsLeft: ap.settings.pomo.focus*60, noise: ap.settings.noise, volume: ap.settings.volume }
+            let timer = d.timer ? { ...d.timer } : { ...s.timer, goalId: ag?ag.id:null, secsLeft: ap.settings.pomo.focus*60, noise: ap.settings.noise, volume: ap.settings.volume, tick: !!ap.settings.tick }
             if (timer.running && timer.endsAt) timer.secsLeft = Math.max(0, Math.round((timer.endsAt - Date.now())/1000))
             return { projects: d.projects, activeProjectId: apid, look: d.look || s.look, logGoalId: ag?ag.id:'', timer }
-          }, () => { if (this.state.timer.running && this.state.timer.mode === 'focus') this.startNoise() })
+          }, () => { if (this.state.timer.running && this.state.timer.mode === 'focus') { this.startNoise(); this.startTick() } })
         }
       } else {
         const old = localStorage.getItem('lt_state_v6')
@@ -161,7 +161,7 @@ export default class LearningTracker extends React.Component {
     } catch (e) {}
     this._tick = setInterval(() => this.tick(), 1000)
   }
-  componentWillUnmount() { if (this._tick) clearInterval(this._tick); this.stopNoise() }
+  componentWillUnmount() { if (this._tick) clearInterval(this._tick); this.stopNoise(); this.stopTick() }
 
   persist() {
     try {
@@ -401,7 +401,7 @@ export default class LearningTracker extends React.Component {
 
   // ---------- focus timer ----------
   modeSecs(mode) { const p = (this.ap() || this.emptyProjectShape()).settings.pomo; return (mode === 'focus' ? p.focus : mode === 'short' ? p.short : p.long) * 60 }
-  setMode(mode) { this.stopNoise(); this.setState(s => ({ timer: { ...s.timer, mode, secsLeft: this.modeSecs(mode), running: false, endsAt: null } }), () => this.persist()) }
+  setMode(mode) { this.stopNoise(); this.stopTick(); this.setState(s => ({ timer: { ...s.timer, mode, secsLeft: this.modeSecs(mode), running: false, endsAt: null } }), () => this.persist()) }
   setFocusMinutes(min) { const m = Math.max(1, Math.min(180, Math.round(+min || 0))); this.commit(s => { const onFocus = s.timer.mode === 'focus' && !s.timer.running; return { projects: s.projects.map(p => p.id !== s.activeProjectId ? p : { ...p, settings: { ...p.settings, pomo: { ...p.settings.pomo, focus: m } } }), timer: onFocus ? { ...s.timer, secsLeft: m*60 } : s.timer } }) }
   toggleTimer() {
     this.setState(s => {
@@ -410,9 +410,9 @@ export default class LearningTracker extends React.Component {
       if (running) { endsAt = Date.now() + secsLeft*1000 }
       else { if (endsAt) secsLeft = Math.max(0, Math.round((endsAt - Date.now())/1000)); endsAt = null }
       return { timer: { ...s.timer, running, secsLeft, endsAt } }
-    }, () => { this.persist(); if (this.state.timer.running && this.state.timer.mode === 'focus') this.startNoise(); else this.stopNoise() })
+    }, () => { this.persist(); if (this.state.timer.running && this.state.timer.mode === 'focus') { this.startNoise(); this.startTick() } else { this.stopNoise(); this.stopTick() } })
   }
-  resetTimer() { this.stopNoise(); this.setState(s => ({ timer: { ...s.timer, secsLeft: this.modeSecs(s.timer.mode), running: false, endsAt: null } }), () => this.persist()) }
+  resetTimer() { this.stopNoise(); this.stopTick(); this.setState(s => ({ timer: { ...s.timer, secsLeft: this.modeSecs(s.timer.mode), running: false, endsAt: null } }), () => this.persist()) }
   skipTimer() { this.completeBlock(true) }
   tick() {
     const t = this.state.timer
@@ -426,7 +426,7 @@ export default class LearningTracker extends React.Component {
   }
   completeBlock(skipped) {
     const t = this.state.timer
-    this.stopNoise()
+    this.stopNoise(); this.stopTick()
     if (t.mode === 'focus' && !skipped) {
       const dur = this.modeSecs('focus')
       const h = +(dur / 3600).toFixed(2)
@@ -439,28 +439,171 @@ export default class LearningTracker extends React.Component {
   }
 
   // ---------- ambient sound ----------
+  ensureCtx() { if (!this._actx) this._actx = new (window.AudioContext || window.webkitAudioContext)(); if (this._actx.state === 'suspended') this._actx.resume(); return this._actx }
+  makeBuffer(ctx, type, secs) {
+    const size = Math.floor(secs * ctx.sampleRate)
+    const buf = ctx.createBuffer(1, size, ctx.sampleRate)
+    const d = buf.getChannelData(0)
+    if (type === 'pink') { let b0=0,b1=0,b2=0,b3=0,b4=0,b5=0,b6=0; for (let i=0;i<size;i++){ const w=Math.random()*2-1; b0=0.99886*b0+w*0.0555179; b1=0.99332*b1+w*0.0750759; b2=0.96900*b2+w*0.1538520; b3=0.86650*b3+w*0.3104856; b4=0.55000*b4+w*0.5329522; b5=-0.7616*b5-w*0.0168980; d[i]=(b0+b1+b2+b3+b4+b5+b6+w*0.5362)*0.11; b6=w*0.115926 } }
+    else if (type === 'brown') { let last=0; for (let i=0;i<size;i++){ const w=Math.random()*2-1; last=(last+0.02*w)/1.02; d[i]=last*3.5 } }
+    else { for (let i=0;i<size;i++) d[i] = Math.random()*2-1 }
+    return buf
+  }
   startNoise() {
     try {
       const t = this.state.timer
-      if (!this._actx) this._actx = new (window.AudioContext || window.webkitAudioContext)()
-      const ctx = this._actx
-      if (ctx.state === 'suspended') ctx.resume()
+      const ctx = this.ensureCtx()
       this.stopNoise()
-      const size = 2 * ctx.sampleRate
-      const buf = ctx.createBuffer(1, size, ctx.sampleRate)
-      const data = buf.getChannelData(0)
-      if (t.noise === 'white') { for (let i=0;i<size;i++) data[i] = Math.random()*2-1 }
-      else if (t.noise === 'pink') { let b0=0,b1=0,b2=0,b3=0,b4=0,b5=0,b6=0; for (let i=0;i<size;i++){ const w=Math.random()*2-1; b0=0.99886*b0+w*0.0555179; b1=0.99332*b1+w*0.0750759; b2=0.96900*b2+w*0.1538520; b3=0.86650*b3+w*0.3104856; b4=0.55000*b4+w*0.5329522; b5=-0.7616*b5-w*0.0168980; data[i]=(b0+b1+b2+b3+b4+b5+b6+w*0.5362)*0.11; b6=w*0.115926 } }
-      else { let last=0; for (let i=0;i<size;i++){ const w=Math.random()*2-1; last=(last+0.02*w)/1.02; data[i]=last*3.5 } }
-      const src = ctx.createBufferSource(); src.buffer = buf; src.loop = true
-      const gain = ctx.createGain(); gain.gain.value = (t.volume/100) * 0.5
-      src.connect(gain).connect(ctx.destination); src.start()
-      this._noiseSrc = src; this._noiseGain = gain
+      this._nodes = []; this._evt = []
+      const master = ctx.createGain(); master.gain.value = (t.volume/100) * 0.5
+      master.connect(ctx.destination)
+      this._noiseGain = master; this._nodes.push(master)
+      this._popBuf = this.makeBuffer(ctx, 'white', 0.4)
+      this.buildAmbient(ctx, master, t.noise)
     } catch (e) {}
   }
-  stopNoise() { try { if (this._noiseSrc) { this._noiseSrc.stop(); this._noiseSrc.disconnect() } if (this._noiseGain) this._noiseGain.disconnect() } catch (e) {} this._noiseSrc = null; this._noiseGain = null }
+  buildAmbient(ctx, out, type) {
+    const reg = n => { this._nodes.push(n); return n }
+    const bed = (kind) => { const s = reg(ctx.createBufferSource()); s.buffer = this.makeBuffer(ctx, kind, 2); s.loop = true; return s }
+    switch (type) {
+      case 'none': break
+      case 'white': case 'pink': case 'brown': {
+        const s = bed(type); s.connect(out); s.start(); break
+      }
+      case 'rain': {
+        const s = bed('white'), hp = reg(ctx.createBiquadFilter()), lp = reg(ctx.createBiquadFilter()), g = reg(ctx.createGain())
+        hp.type='highpass'; hp.frequency.value=420; lp.type='lowpass'; lp.frequency.value=7200; g.gain.value=0.9
+        s.connect(hp).connect(lp).connect(g).connect(out); s.start()
+        const b = bed('brown'), blp = reg(ctx.createBiquadFilter()), bg = reg(ctx.createGain())
+        blp.type='lowpass'; blp.frequency.value=480; bg.gain.value=0.3; b.connect(blp).connect(bg).connect(out); b.start()
+        break
+      }
+      case 'ocean': {
+        const s = bed('brown'), lp = reg(ctx.createBiquadFilter()), g = reg(ctx.createGain())
+        lp.type='lowpass'; lp.frequency.value=550; g.gain.value=0.5; s.connect(lp).connect(g).connect(out); s.start()
+        const lfo = reg(ctx.createOscillator()), lg = reg(ctx.createGain())
+        lfo.frequency.value=0.09; lg.gain.value=0.45; lfo.connect(lg).connect(g.gain); lfo.start()
+        const lf2 = reg(ctx.createOscillator()), lg2 = reg(ctx.createGain())
+        lf2.frequency.value=0.09; lg2.gain.value=380; lf2.connect(lg2).connect(lp.frequency); lf2.start()
+        break
+      }
+      case 'wind': {
+        const s = bed('brown'), lp = reg(ctx.createBiquadFilter()), g = reg(ctx.createGain())
+        lp.type='lowpass'; lp.frequency.value=500; lp.Q.value=4; g.gain.value=0.7; s.connect(lp).connect(g).connect(out); s.start()
+        const lfo = reg(ctx.createOscillator()), lg = reg(ctx.createGain())
+        lfo.frequency.value=0.12; lg.gain.value=320; lfo.connect(lg).connect(lp.frequency); lfo.start()
+        const lf2 = reg(ctx.createOscillator()), lg2 = reg(ctx.createGain())
+        lf2.frequency.value=0.07; lg2.gain.value=0.3; lf2.connect(lg2).connect(g.gain); lf2.start()
+        break
+      }
+      case 'fire': {
+        const b = bed('brown'), blp = reg(ctx.createBiquadFilter()), bg = reg(ctx.createGain())
+        blp.type='lowpass'; blp.frequency.value=420; bg.gain.value=0.42; b.connect(blp).connect(bg).connect(out); b.start()
+        this.scheduleEvents(() => this.pop(ctx, out, { f:1400+Math.random()*2600, dur:0.03+Math.random()*0.06, gain:0.25+Math.random()*0.4, kind:'band', q:2 }), () => 40+Math.random()*180)
+        break
+      }
+      case 'train': {
+        const b = bed('brown'), blp = reg(ctx.createBiquadFilter()), bg = reg(ctx.createGain())
+        blp.type='lowpass'; blp.frequency.value=240; bg.gain.value=0.5; b.connect(blp).connect(bg).connect(out); b.start()
+        this.scheduleEvents(() => { this.pop(ctx, out, { f:180, dur:0.05, gain:0.5, kind:'low' }); this._evt.push(setTimeout(() => this.pop(ctx, out, { f:180, dur:0.05, gain:0.42, kind:'low' }), 150)) }, () => 900)
+        break
+      }
+      case 'cafe': {
+        const s = bed('brown'), bp = reg(ctx.createBiquadFilter()), g = reg(ctx.createGain())
+        bp.type='bandpass'; bp.frequency.value=900; bp.Q.value=0.7; g.gain.value=0.5; s.connect(bp).connect(g).connect(out); s.start()
+        const lfo = reg(ctx.createOscillator()), lg = reg(ctx.createGain())
+        lfo.frequency.value=0.5; lg.gain.value=0.18; lfo.connect(lg).connect(g.gain); lfo.start()
+        this.scheduleEvents(() => this.pop(ctx, out, { f:2600+Math.random()*2400, dur:0.09, gain:0.1, kind:'ring', q:9 }), () => 2200+Math.random()*5200)
+        break
+      }
+      case 'forest': {
+        const b = bed('pink'), lp = reg(ctx.createBiquadFilter()), g = reg(ctx.createGain())
+        lp.type='lowpass'; lp.frequency.value=900; g.gain.value=0.28; b.connect(lp).connect(g).connect(out); b.start()
+        this.scheduleEvents(() => this.chirp(ctx, out), () => 1400+Math.random()*4200)
+        break
+      }
+      case 'stream': {
+        const s = bed('white'), bp = reg(ctx.createBiquadFilter()), g = reg(ctx.createGain())
+        bp.type='bandpass'; bp.frequency.value=1800; bp.Q.value=0.6; g.gain.value=0.5; s.connect(bp).connect(g).connect(out); s.start()
+        const lfo = reg(ctx.createOscillator()), lg = reg(ctx.createGain())
+        lfo.frequency.value=3.5; lg.gain.value=650; lfo.connect(lg).connect(bp.frequency); lfo.start()
+        break
+      }
+      default: { const s = bed('brown'); s.connect(out); s.start() }
+    }
+  }
+  scheduleEvents(fn, delayFn) {
+    const run = () => { if (!this._noiseGain) return; try { fn() } catch (e) {} this._evt.push(setTimeout(run, delayFn())) }
+    this._evt.push(setTimeout(run, delayFn()))
+  }
+  pop(ctx, out, o) {
+    try {
+      const src = ctx.createBufferSource(); src.buffer = this._popBuf
+      const flt = ctx.createBiquadFilter()
+      if (o.kind === 'low') { flt.type='lowpass'; flt.frequency.value=o.f*2.2 }
+      else if (o.kind === 'ring') { flt.type='bandpass'; flt.frequency.value=o.f; flt.Q.value=o.q||9 }
+      else { flt.type='bandpass'; flt.frequency.value=o.f; flt.Q.value=o.q||2 }
+      const g = ctx.createGain(); const now = ctx.currentTime
+      g.gain.setValueAtTime(0.0001, now)
+      g.gain.linearRampToValueAtTime(o.gain, now+0.004)
+      g.gain.exponentialRampToValueAtTime(0.0001, now+o.dur)
+      src.connect(flt).connect(g).connect(out); src.start(now); src.stop(now+o.dur+0.05)
+      src.onended = () => { try { src.disconnect(); flt.disconnect(); g.disconnect() } catch (e) {} }
+    } catch (e) {}
+  }
+  chirp(ctx, out) {
+    try {
+      const reps = Math.random() < 0.4 ? 2 : 1
+      for (let r=0;r<reps;r++) {
+        const o = ctx.createOscillator(), g = ctx.createGain()
+        const start = ctx.currentTime + r*0.18
+        const base = 2100 + Math.random()*1400
+        o.type='sine'; o.frequency.setValueAtTime(base, start)
+        o.frequency.linearRampToValueAtTime(base + (Math.random()*700-150), start+0.11)
+        g.gain.setValueAtTime(0.0001, start)
+        g.gain.linearRampToValueAtTime(0.07, start+0.02)
+        g.gain.exponentialRampToValueAtTime(0.0001, start+0.16)
+        o.connect(g).connect(out); o.start(start); o.stop(start+0.2)
+        o.onended = () => { try { o.disconnect(); g.disconnect() } catch (e) {} }
+      }
+    } catch (e) {}
+  }
+  stopNoise() {
+    try { (this._evt||[]).forEach(id => clearTimeout(id)) } catch (e) {}
+    this._evt = []
+    try { (this._nodes||[]).forEach(n => { try { if (n.stop) n.stop() } catch (e) {} try { n.disconnect() } catch (e) {} }) } catch (e) {}
+    this._nodes = []; this._noiseGain = null
+  }
   setNoise(n) { this.commit(s => ({ projects: s.projects.map(p => p.id !== s.activeProjectId ? p : { ...p, settings: { ...p.settings, noise: n } }), timer: { ...s.timer, noise: n } })); setTimeout(() => { if (this.state.timer.running && this.state.timer.mode==='focus') this.startNoise() }, 0) }
   setVolume(v) { this.setState(s => ({ projects: s.projects.map(p => p.id !== s.activeProjectId ? p : { ...p, settings: { ...p.settings, volume: v } }), timer: { ...s.timer, volume: v } }), () => { if (this._noiseGain) this._noiseGain.gain.value = (v/100)*0.5; this.persist() }) }
+  // ---------- clock tick ----------
+  startTick() {
+    this.stopTick()
+    if (!this.state.timer.tick) return
+    const ctx = this.ensureCtx()
+    let n = 0
+    this.tickSound(ctx, true); n++
+    this._tickTimer = setInterval(() => { if (!this.state.timer.running) return; this.tickSound(ctx, n%2===0); n++ }, 1000)
+  }
+  stopTick() { if (this._tickTimer) { clearInterval(this._tickTimer); this._tickTimer = null } }
+  tickSound(ctx, high) {
+    try {
+      if (!this._tickBuf) this._tickBuf = this.makeBuffer(ctx, 'white', 0.08)
+      const src = ctx.createBufferSource(); src.buffer = this._tickBuf
+      const flt = ctx.createBiquadFilter(); flt.type='bandpass'; flt.frequency.value = high ? 2700 : 2050; flt.Q.value=7
+      const g = ctx.createGain(); const now = ctx.currentTime
+      const vol = (this.state.timer.volume/100)*0.22 + 0.06
+      g.gain.setValueAtTime(0.0001, now)
+      g.gain.linearRampToValueAtTime(vol, now+0.002)
+      g.gain.exponentialRampToValueAtTime(0.0001, now+0.045)
+      src.connect(flt).connect(g).connect(ctx.destination); src.start(now); src.stop(now+0.07)
+      src.onended = () => { try { src.disconnect(); flt.disconnect(); g.disconnect() } catch (e) {} }
+    } catch (e) {}
+  }
+  setTick() {
+    this.commit(s => { const tick = !s.timer.tick; return { projects: s.projects.map(p => p.id !== s.activeProjectId ? p : { ...p, settings: { ...p.settings, tick } }), timer: { ...s.timer, tick } } })
+    setTimeout(() => { if (this.state.timer.running && this.state.timer.mode==='focus') { if (this.state.timer.tick) this.startTick(); else this.stopTick() } }, 0)
+  }
   setFocusGoal(id) { this.commit(s => ({ timer: { ...s.timer, goalId: id }, projects: s.projects.map(p => p.id !== s.activeProjectId ? p : { ...p, activeGoalId: id }) })) }
   setLook(v) { this.commit(() => ({ look: v })) }
 
@@ -670,7 +813,6 @@ export default class LearningTracker extends React.Component {
     const tabActive = 'padding:9px 20px;border-radius:9px;font-size:14px;font-weight:700;background:var(--app-accent);color:var(--app-accent-on);cursor:pointer;'
     const focusGoal = p.goals.find(g=>g.id===t.goalId) || activeGoal
     const nextTask = focusGoal ? ((focusGoal.subTasks.find(x=>!x.done) || {}).label || 'كل المهام مكتملة — راجع أو خطط للتالي') : 'لا أهداف بعد — أضف هدفًا لربط جلستك به'
-    const noiseChip = (n) => (t.noise===n) ? 'flex:1;text-align:center;padding:9px 0;border-radius:9px;font-size:13px;font-weight:700;background:var(--app-accent);color:var(--app-accent-on);cursor:pointer;' : 'flex:1;text-align:center;padding:9px 0;border-radius:9px;font-size:13px;font-weight:600;background:var(--app-surface-2);color:var(--app-muted);cursor:pointer;'
 
     const hr = new Date().getHours()
     const greet = hr<12 ? 'صباح الخير، عبدالله' : 'مساء الخير، عبدالله'
@@ -803,8 +945,16 @@ export default class LearningTracker extends React.Component {
       durationPresets: [25,40,50,60].map(min => ({ min, set: () => this.setFocusMinutes(min), style: (set.pomo.focus===min ? 'padding:6px 12px;border-radius:8px;font-size:13px;font-weight:700;background:var(--app-accent);color:var(--app-accent-on);cursor:pointer;' : 'padding:6px 12px;border-radius:8px;font-size:13px;font-weight:600;background:var(--app-surface);border:1px solid var(--app-border);color:var(--app-muted);cursor:pointer;') })),
       toggleTimer: () => this.toggleTimer(), resetTimer: () => this.resetTimer(), skipTimer: () => this.skipTimer(),
       focusGoalId:t.goalId, setFocusGoal: e => this.setFocusGoal(e.target.value), activeGoalOptions, focusNextTask: nextTask,
-      noiseWhiteStyle:noiseChip('white'), noisePinkStyle:noiseChip('pink'), noiseBrownStyle:noiseChip('brown'),
-      setNoiseWhite: () => this.setNoise('white'), setNoisePink: () => this.setNoise('pink'), setNoiseBrown: () => this.setNoise('brown'),
+      noiseValue: t.noise, setNoiseSel: e => this.setNoise(e.target.value),
+      noiseOptions: [
+        {id:'none',label:'بدون'},{id:'rain',label:'مطر'},{id:'ocean',label:'أمواج'},
+        {id:'wind',label:'رياح'},{id:'fire',label:'مدفأة'},{id:'train',label:'قطار'},
+        {id:'cafe',label:'مقهى'},{id:'forest',label:'غابة'},{id:'stream',label:'جدول'},
+        {id:'white',label:'أبيض'},{id:'pink',label:'وردي'},{id:'brown',label:'بني'},
+      ],
+      tickOn: t.tick, toggleTick: () => this.setTick(),
+      tickSwitchStyle: 'width:46px;height:26px;flex-shrink:0;border-radius:999px;border:1px solid '+(t.tick?'var(--app-accent)':'var(--app-border)')+';background:'+(t.tick?'var(--app-accent)':'var(--app-surface-2)')+';cursor:pointer;display:flex;align-items:center;padding:3px;justify-content:'+(t.tick?'flex-start':'flex-end')+';transition:background .2s;',
+      tickKnobStyle: 'width:18px;height:18px;border-radius:50%;background:'+(t.tick?'var(--app-accent-on)':'var(--app-faint)')+';display:block;',
       volume:t.volume, volumeLabel:t.volume+'%', setVolume: e => this.setVolume(+e.target.value),
       logDate:st.logDate, setLogDate: e => this.setState({logDate:e.target.value}),
       logHours: fmt1(logH), incHours: () => this.addHours(0.5), decHours: () => this.addHours(-0.5),
@@ -1339,12 +1489,20 @@ export default class LearningTracker extends React.Component {
                   <span style={css('font-size:12px;color:var(--app-faint);')}>الصوت المحيط</span>
                   <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="var(--app-accent)" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="M11 5 6 9H3v6h3l5 4z"></path><path d="M15.5 8.5a5 5 0 0 1 0 7"></path></svg>
                 </div>
-                <div style={css('display:flex;gap:6px;margin-bottom:16px;')}>
-                  <span onClick={v.setNoiseWhite} style={css(v.noiseWhiteStyle)}>أبيض</span>
-                  <span onClick={v.setNoisePink} style={css(v.noisePinkStyle)}>وردي</span>
-                  <span onClick={v.setNoiseBrown} style={css(v.noiseBrownStyle)}>بني</span>
+                <div style={css('position:relative;margin-bottom:14px;')}>
+                  <select value={v.noiseValue} onChange={v.setNoiseSel} style={css('width:100%;appearance:none;background:var(--app-surface-2);border:1px solid var(--app-border);border-radius:11px;padding:11px 38px 11px 14px;color:var(--app-text);font:600 14px var(--font-brand);cursor:pointer;outline:none;')}>
+                    {v.noiseOptions.map(o => <option key={o.id} value={o.id}>{o.label}</option>)}
+                  </select>
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="var(--app-faint)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={css('position:absolute;left:14px;top:50%;transform:translateY(-50%);pointer-events:none;')}><path d="m6 9 6 6 6-6"></path></svg>
                 </div>
-                <div style={css('display:flex;align-items:center;gap:12px;')}>
+                <div style={css('display:flex;align-items:center;justify-content:space-between;gap:12px;padding:12px 0;margin-bottom:6px;border-top:1px solid var(--app-border);border-bottom:1px solid var(--app-border);')}>
+                  <div style={css('display:flex;flex-direction:column;gap:2px;')}>
+                    <span style={css('font-size:13px;font-weight:600;color:var(--app-text);')}>دقّات الساعة</span>
+                    <span style={css('font-size:11px;color:var(--app-faint);')}>صوت تيك-تَك مع كل ثانية</span>
+                  </div>
+                  <button onClick={v.toggleTick} style={css(v.tickSwitchStyle)}><span style={css(v.tickKnobStyle)}></span></button>
+                </div>
+                <div style={css('display:flex;align-items:center;gap:12px;margin-top:12px;')}>
                   <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="var(--app-faint)" strokeWidth="1.8" strokeLinecap="round"><path d="M11 5 6 9H3v6h3l5 4z"></path></svg>
                   <input type="range" min="0" max="100" value={v.volume} onChange={v.setVolume} style={css('flex:1;cursor:pointer;')} />
                   <span className="num" style={css('font-size:13px;color:var(--app-muted);width:38px;')}>{v.volumeLabel}</span>
